@@ -51,7 +51,7 @@ jobs:
               -Iraylib-src/src/external/glfw/include -c "$f" -o "obj/$(basename "${f%.c}").o"
           done
           ar rcs deps/libraylib.a obj/*.o
-          make
+          make RAYLIB_STATIC=1
       - name: Package
         run: |
           mkdir -p dist

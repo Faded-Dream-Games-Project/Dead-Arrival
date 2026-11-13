@@ -62,15 +62,23 @@ gcc -O2 -Isrc -Iraylib-src/src src/*.c raylib.lib -o DeadArrival.exe -lopengl32 
 ```
 
 ### Linux
+`make` uses the raylib already installed on your system (pkg-config, or
+`/usr/local` + `-lraylib` as fallback). Nothing is cloned or downloaded.
+
 ```
-sudo apt install libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl-dev
-git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
-sudo apt-get install -y libasound2-dev libx11-dev libxcursor-dev libxrandr-dev \
-     libxinerama-dev libxi-dev libgl-dev libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev
-make   # builds raylib 6.2 + game
+sudo apt install libasound2-dev libx11-dev libxcursor-dev libxrandr-dev \
+     libxinerama-dev libxi-dev libgl-dev libxcb1-dev libxkbcommon-dev \
+     libxau-dev libxdmcp-dev
 make
 ./deadarrival
 ```
+
+No system raylib? Build one and point the Makefile at it:
+```
+make RAYLIB_STATIC=1   # links deps/libraylib.a, headers from raylib-src/
+```
+That's the CI layout — `.github/workflows/build.yml` shows the exact commands
+to build raylib 6.2 into those paths.
 
 ## Assets
 `textures/` and `sfx/` are plain PNG/WAV files sitting next to the binary —
@@ -87,6 +95,10 @@ box there is simply no device and the game stays silent by design.
 **Link errors on Linux (xcb / xkbcommon / Xau undefined)** — raylib 6.x GLFW
 needs XCB; install `libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev`
 (the Makefile links them automatically, `sudo apt-get install` first).
+
+**`cannot find -lraylib`** — no system raylib found. Install raylib 6.2
+(`sudo apt install libraylib-dev` on newer distros, or build from source),
+or use `make RAYLIB_STATIC=1` with your own prebuilt `deps/libraylib.a`.
 
 **Mouse stuck / free** — the cursor is captured automatically when a round
 starts and released on pause/menus (Esc). F11 toggles fullscreen.
