@@ -221,7 +221,7 @@ void ZombiesUpdate(void) {
                 Vector3 vel = Vec3Scale(dir, z->speed);
                 float gy;
                 Vector3 npos = z->pos;
-                CollideMove(&npos, &vel, 0.36f, 1.75f, &gy);
+                CollideMove(&npos, &vel, 0.36f, 1.75f, (float)g.dt, &gy);
                 if (gy > -50) z->groundY = gy;
                 z->pos = npos;
                 // step down onto ground

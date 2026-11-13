@@ -18,9 +18,10 @@ and open doors to expand the map — until you go down.
 - **20 guns** (pistols, SMGs, shotguns, rifles, LMGs, sniper) plus the knife.
   A few are wall buys; everything else can drop from the Mystery Box (950 points).
 - **Points economy**: +10 per bullet hit, +50 per kill, 500 to start.
-- **Perk sodas**: Self Revive (auto get-back-up when downed, one use per purchase),
-  Regen Soda (auto-regen 10 s after the last hit), Swift Soda (40% faster reloads),
-  Rapid Cola (25% faster fire rate).
+- **Perk sodas** (machines glow on the map): Self Revive (auto get-back-up when
+  downed, one use per purchase), Regen Soda (auto-regen 10 s after the last hit),
+  Swift Soda (40% faster reloads), Rapid Cola (25% faster fire rate),
+  Stamin-Up (move & sprint faster).
 - **2-hit down system**: 100 HP, zombies take 50 per swipe.
 - **4 maps**, each with its own lighting, fog, ambience and gimmicks:
   1. **The Grand Theater** — auditorium, stage, balcony, backstage, back alley.
@@ -74,10 +75,26 @@ make
 mod-friendly by design. If a file is missing, the game generates a procedural
 fallback at runtime so it always runs.
 
+## Troubleshooting
+
+**No sound** — the audio device must exist before sounds load; the game calls
+`InitAudioDevice()` itself, so if you see `WARNING: AUDIO: Failed to initialize
+playback device`, check `aplay -l` / pulseaudio / pipewire first. On a headless
+box there is simply no device and the game stays silent by design.
+
+**Built against raylib 6.x and something broke** — the game targets raylib 5.5
+(the Makefile clones and builds 5.5 automatically). raylib 6.x changed some
+audio/stream internals; if you link 6.x and hit issues, use `make` which pins
+5.5, or grab the prebuilt exe from Actions artifacts.
+
+**Mouse stuck / free** — the cursor is captured automatically when a round
+starts and released on pause/menus (Esc). F11 toggles fullscreen.
+
 ## Status
 
-- [x] 4 maps, 20 weapons, perks, mystery box, doors, points economy
+- [x] 4 maps, 20 weapons, 5 perks, mystery box, doors, points economy
 - [x] Selftest mode (`./deadarrival --selftest`) validating maps, nav paths, weapon rules
+- [x] Smoke mode (`./deadarrival --smoke <dir> <mapId>`) headless run with screenshots + movement-speed regression check
 - [ ] Custom map loading (menu entry present, marked Coming Soon)
 - [ ] Multiplayer (menu entry present, marked Coming Soon)
 

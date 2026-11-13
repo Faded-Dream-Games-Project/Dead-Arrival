@@ -156,12 +156,14 @@ void AssetsLoad(void) {
     SetTextureFilter(sTextures[TEX_BLOODVIGN], TEXTURE_FILTER_BILINEAR);
     SetTextureFilter(sTextures[TEX_PARTICLE], TEXTURE_FILTER_BILINEAR);
 
-    for (int i = 0; i < SND_COUNT; i++) {
-        char path[600];
-        snprintf(path, sizeof path, "%s/%s", sAssetBase, SND_FILES[i]);
-        if (FileExists(path)) {
-            sSnd[i] = LoadSound(path);
-            sSndValid[i] = sSnd[i].frameCount > 0;
+    if (IsAudioDeviceReady()) {
+        for (int i = 0; i < SND_COUNT; i++) {
+            char path[600];
+            snprintf(path, sizeof path, "%s/%s", sAssetBase, SND_FILES[i]);
+            if (FileExists(path)) {
+                sSnd[i] = LoadSound(path);
+                sSndValid[i] = sSnd[i].frameCount > 0;
+            }
         }
     }
 }
@@ -193,14 +195,17 @@ void SfxPlay(int id, float pitch, float vol) {
 
 void MusicStart(int mapId) {
     MusicStop();
+    if (!IsAudioDeviceReady()) return;
     char path[600];
     snprintf(path, sizeof path, "%s/sfx/ambient%d.wav", sAssetBase, (int)mapId);
     if (FileExists(path)) {
         sMusic = LoadMusicStream(path);
-        sMusic.looping = true;
-        SetMusicVolume(sMusic, 0.55f*sMasterVolume);
-        PlayMusicStream(sMusic);
-        sMusicValid = true;
+        if (sMusic.stream.buffer != NULL) {
+            sMusic.looping = true;
+            SetMusicVolume(sMusic, 0.55f*sMasterVolume);
+            PlayMusicStream(sMusic);
+            sMusicValid = true;
+        }
     }
 }
 

@@ -1,26 +1,35 @@
 # Dead Arrival - build (Linux)
-# raylib is built from source into a static lib; see build_windows.sh for the
-# Windows cross-compile and .github/workflows/build.yml for CI builds.
+# raylib 5.5 is cloned and built from source automatically on first build
+# (static link). Windows: see .github/workflows/build.yml.
 
-CC      = gcc
+CC      ?= gcc
 CFLAGS  = -O2 -Wall -Wno-unused-variable -Wno-unused-function -std=c11
-IFLAGS  = -Isrc -Ideps/raylib/src
-LDFLAGS =
-LDLIBS  = -lraylib -lGL -lX11 -lXrandr -lXinerama -lXi -lXcursor -lasound -lpthread -ldl -lm
+IFLAGS  = -Isrc -Iraylib-src/src
+LDLIBS  = -lGL -lX11 -lXrandr -lXinerama -lXi -lXcursor -lasound -lpthread -ldl -lm
 
 SRC     = $(wildcard src/*.c)
 OBJ     = $(SRC:.c=.o)
 BIN     = deadarrival
-
-# If a local raylib source tree exists, build the static lib from it.
-RAYLIB_A = deps/raylib-$(shell uname -m).a
+RLIB    = deps/libraylib.a
 
 .PHONY: all clean selftest
 
 all: $(BIN)
 
-$(BIN): $(OBJ)
-	$(CC) $(LDFLAGS) $(OBJ) -o $(BIN) -Ldeps $(LDLIBS)
+raylib-src:
+	git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+
+$(RLIB): | raylib-src
+	@mkdir -p obj deps
+	@for f in raylib-src/src/*.c; do \
+	  o="obj/rl_$(basename $$f).o"; \
+	  $(CC) -O2 -DPLATFORM_DESKTOP -D_GLFW_X11 -Iraylib-src/src \
+	    -Iraylib-src/src/external/glfw/include -c "$$f" -o "$$o" || exit 1; \
+	done
+	ar rcs $@ obj/rl_*.o
+
+$(BIN): $(OBJ) $(RLIB)
+	$(CC) $(OBJ) -o $(BIN) -Ldeps $(LDLIBS)
 
 src/%.o: src/%.c src/game.h
 	$(CC) $(CFLAGS) $(IFLAGS) -c $< -o $@

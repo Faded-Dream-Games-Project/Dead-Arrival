@@ -118,6 +118,7 @@ void HudUpdate(void) {
     if (g.hitMarker > 0) g.hitMarker -= (float)g.dt;
     if (g.damageFlash > 0) g.damageFlash -= (float)g.dt * 1.6f;
     if (g.muzzleFlash > 0) g.muzzleFlash -= (float)g.dt;
+    else GfxSetFlash(Vec3(0,0,0), 0.0f);   // clear stale flash light
     if (g.shakeTime > 0) g.shakeTime -= (float)g.dt;
     if (g.roundBannerTime > 0) g.roundBannerTime -= (float)g.dt;
     sTitleTime += (float)g.dt;

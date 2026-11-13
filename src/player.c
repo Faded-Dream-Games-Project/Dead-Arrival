@@ -96,7 +96,7 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
     }
     // Perk stations
     for (int i = 0; i < g.map.perkCount; i++) {
-        Vector3 pp = Vec3(g.map.perks[i].pos.x, 1.0f, g.map.perks[i].pos.z);
+        Vector3 pp = Vec3(g.map.perks[i].pos.x, g.map.perks[i].pos.y + 1.0f, g.map.perks[i].pos.z);
         Vector3 d = Vec3Sub(pp, eye);
         float dist = Vec3Len(d);
         if (dist > 2.8f) continue;
@@ -185,7 +185,10 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
             }
         }
     } else if (best == IA_BOX && label) {
-        if (g.boxInUse) snprintf(label, labelSize, "The box is stirring...");
+        if (g.boxInUse) {
+            if (g.boxResultWeapon >= 0) snprintf(label, labelSize, "[E] Take %s", WEAPONS[g.boxResultWeapon].name);
+            else snprintf(label, labelSize, "The box is stirring...");
+        }
         else snprintf(label, labelSize, "[E] Mystery Box (%d)", BOX_PRICE);
         if (doIt && !g.boxInUse) {
             if (p->points >= BOX_PRICE) {
@@ -242,6 +245,7 @@ void PlayerUpdate(void) {
     float speed = crouched ? PLAYER_CRAWL : (sprinting ? PLAYER_SPRINT : PLAYER_WALK);
     // downed-not-possible here; reload slows slightly
     if (p->reloadTimer > 0) speed *= 0.85f;
+    if (p->perks[PERK_STAMIN]) speed *= (sprinting ? 1.16f : 1.08f);
 
     if (moving) {
         p->vel.x = wish.x * speed;
@@ -262,7 +266,7 @@ void PlayerUpdate(void) {
     p->vel.y -= GRAVITY * (float)g.dt;
     if (p->vel.y < -40) p->vel.y = -40;
     float groundY;
-    p->grounded = CollideMove(&p->pos, &p->vel, PLAYER_RADIUS, PLAYER_HEIGHT, &groundY);
+    p->grounded = CollideMove(&p->pos, &p->vel, PLAYER_RADIUS, PLAYER_HEIGHT, (float)g.dt, &groundY);
 
     // footsteps
     if (moving && p->grounded) {
@@ -295,7 +299,8 @@ void PlayerUpdate(void) {
         float dx = p->pos.x - pad->pos.x, dz = p->pos.z - pad->pos.z;
         float py = GroundHeightAt(p->pos.x, p->pos.z, p->pos.y + 0.5f);
         if (dx*dx + dz*dz < pad->radius*pad->radius &&
-            fabsf(p->pos.y - py) < 0.3f && p->grounded) {
+            fabsf(p->pos.y - py) < 0.3f && p->grounded &&
+            fabsf(p->pos.y - pad->pos.y) < 0.6f) {
             p->vel = pad->impulse;
             p->grounded = false;
             SfxPlay(SND_JUMP_PAD, 1.0f, 0.9f);
@@ -349,7 +354,7 @@ void PlayerDownedUpdate(void) {
     } else { p->vel.x = 0; p->vel.z = 0; }
     p->vel.y -= GRAVITY * (float)g.dt;
     float gy;
-    CollideMove(&p->pos, &p->vel, PLAYER_RADIUS, 0.9f, &gy);
+    CollideMove(&p->pos, &p->vel, PLAYER_RADIUS, 0.9f, (float)g.dt, &gy);
     if (p->downTimer <= 0) GameOverSequence();
 }
 

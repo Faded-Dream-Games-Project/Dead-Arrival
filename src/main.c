@@ -77,6 +77,7 @@ void GameStart(MapId id) {
     g.roundBannerActive = true;
     g.roundBannerTime = 3.0f;
     GfxSetScene(g.map.sunDir, g.map.sunColor, g.map.ambient, g.map.fogColor, g.map.fogDensity);
+    g.fovCur = g.fovSetting;
     MusicStart(id);
     g.state = STATE_PLAYING;
 }
@@ -167,12 +168,25 @@ static int RunSelftest(void) {
 static int RunSmoke(const char *outdir, int mapId, float seconds) {
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
     InitWindow(1280, 720, "smoke");
+    InitAudioDevice();
     SetTargetFPS(60);
+    LoadSettings(); LoadScores();
+    SfxSetVolume(g.volume);
     AssetsLoad();
     HudInitFont();
-    LoadSettings(); LoadScores();
     GfxInit();
     GameStart((MapId)mapId);
+    // movement regression check: 0.25 s of walking must move ~0.9 m, not 60x that
+    {
+        Vector3 p0 = g.player.pos;
+        Vector3 mvel = { 0.0f, 0.0f, PLAYER_WALK };
+        float mgy;
+        CollideMove(&g.player.pos, &mvel, PLAYER_RADIUS, PLAYER_HEIGHT, 0.25f, &mgy);
+        float dz = g.player.pos.z - p0.z;
+        printf("movement check: %.3f m over 0.25 s (walk %.2f m/s)\n", dz, PLAYER_WALK);
+        if (dz < 0.35f || dz > 1.4f) { printf("SMOKE FAIL: movement speed broken\n"); CloseAudioDevice(); CloseWindow(); return 1; }
+        g.player.pos = p0;
+    }
     g.roundBannerActive = false;   // no banner in screenshots
     char path[256];
     int shots = 0;
@@ -180,6 +194,7 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
     bool wroteOne = false;
     while (!WindowShouldClose() && t < seconds) {
         float dt = GetFrameTime();
+        if (dt > 0.05f) dt = 0.05f;
         g.dt = dt; g.time = GetTime();
         // scripted input: look around slowly, no movement (spawn safety)
         g.player.yaw += dt * 12.0f;
@@ -195,6 +210,7 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
         GfxBegin(cam);
         GfxDrawStatic();
         BoxDrawWorld();
+        MapDrawInteractables();
         // closed doors drawn dynamically
         for (int i = 0; i < g.map.boxCount; i++)
             if (g.map.boxes[i].doorId > 0 && !g.map.doorOpen[g.map.boxes[i].doorId-1])
@@ -214,6 +230,7 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
         }
         wroteOne = shots > 0;
     }
+    CloseAudioDevice();
     CloseWindow();
     printf("smoke map %d: %s (%d screenshots)\n", mapId, wroteOne ? "OK" : "NO SHOTS", shots);
     return wroteOne ? 0 : 1;
@@ -241,19 +258,29 @@ int main(int argc, char **argv) {
     memset(&g, 0, sizeof(g));
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
     InitWindow(1280, 720, GAME_TITLE);
+    InitAudioDevice();
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);      // handle ESC ourselves
-    AssetsLoad();
-    HudInitFont();
     LoadSettings(); LoadScores();
     SfxSetVolume(g.volume);
+    AssetsLoad();
+    HudInitFont();
     GfxInit();
     g.state = STATE_TITLE;
 
     while (!WindowShouldClose() && !g.windowShouldClose) {
         float dt = GetFrameTime();
+        if (dt > 0.05f) dt = 0.05f;   // cap: no teleporting through walls on hitches
         g.dt = dt; g.time = GetTime();
         MusicUpdate();
+
+        // cursor capture: grabbed in gameplay, free in menus/pause
+        static GameState prevState = STATE_TITLE;
+        if (g.state != prevState) {
+            if (g.state == STATE_PLAYING) DisableCursor();
+            else EnableCursor();
+            prevState = g.state;
+        }
 
         // global keys
         if (IsKeyPressed(KEY_ESCAPE)) {
@@ -293,6 +320,7 @@ int main(int argc, char **argv) {
             GfxBegin(cam);
             GfxDrawStatic();
             BoxDrawWorld();
+            MapDrawInteractables();
             for (int i = 0; i < g.map.boxCount; i++)
                 if (g.map.boxes[i].doorId > 0 && !g.map.doorOpen[g.map.boxes[i].doorId-1])
                     GfxDrawBox(g.map.boxes[i].aabb, g.map.boxes[i].tex, WHITE);
@@ -311,6 +339,7 @@ int main(int argc, char **argv) {
     SaveSettings(); SaveScores();
     AssetsUnload();
     GfxShutdown();
+    CloseAudioDevice();
     CloseWindow();
     return 0;
 }

@@ -37,6 +37,7 @@ const PerkDef PERKS[PERK_COUNT] = {
     [PERK_REGEN]  = { "Regen Soda",  "Health regenerates 10 s after the last zombie hit",        1500, { 230, 120,  60 } },
     [PERK_SWIFT]  = { "Swift Soda",  "Reload 40% faster",                                        3000, { 240, 200,  80 } },
     [PERK_RAPID]  = { "Rapid Cola",  "Fire 25% faster",                                          3000, { 220,  60,  60 } },
+    [PERK_STAMIN] = { "Stamin-Up",   "Move and sprint faster",                                    2000, {  90, 200, 220 } },
 };
 
 const char* WeaponName(int widx) { return WEAPONS[widx].name; }

@@ -19,7 +19,7 @@
 // Version / identity
 // ---------------------------------------------------------------------------
 #define GAME_TITLE        "Dead Arrival"
-#define GAME_VERSION      "0.1.0"
+#define GAME_VERSION      "0.1.1"
 #define ORG_NAME          "Faded Dream Games Project"
 
 // ---------------------------------------------------------------------------
@@ -141,6 +141,7 @@ typedef enum {
     PERK_REGEN,          // Regen Soda - auto regen 10 s after last hit
     PERK_SWIFT,          // Swift Soda - 40% faster reloads
     PERK_RAPID,          // Rapid Cola - 25% faster fire rate
+    PERK_STAMIN,         // Stamin-Up - move & sprint faster
     PERK_COUNT
 } PerkType;
 
@@ -388,7 +389,7 @@ void    MusicUpdate(void);
 void    MapLoad(MapId id);
 void    MapUnload(void);
 bool    MapValidate(MapId id, char *err, int errSize);  // selftest helper
-bool    CollideMove(Vector3 *pos, Vector3 *vel, float radius, float height, float *groundYOut);
+bool    CollideMove(Vector3 *pos, Vector3 *vel, float radius, float height, float dt, float *groundYOut);
 float   GroundHeightAt(float x, float z, float fromY);
 bool    NavFind(Vector3 from, Vector3 to, Vector3 *path, int *pathLen, int maxLen);
 bool    NavWalkableLine(Vector3 a, Vector3 b);
@@ -396,6 +397,7 @@ void    NavRebuild(void);
 bool    DoorTryOpen(int doorIdx);               // checks points, opens
 bool    InKillzone(Vector3 pos);
 bool    MapRayHitWalls(Vector3 origin, Vector3 dir, float maxDist, float *tOut);
+void    MapDrawInteractables(void);   // perk machines, wall buys, ziplines, pads
 
 // ---------------------------------------------------------------------------
 // Module: player

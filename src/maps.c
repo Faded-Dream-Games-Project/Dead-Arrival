@@ -116,16 +116,16 @@ static void WallBuyAdd(MapDef *m, int widx, float x, float y, float z, float yaw
     m->wallbuys[m->wallbuyCount].yaw = yaw;
     m->wallbuyCount++;
 }
-static void PerkAdd(MapDef *m, PerkType t, float x, float z, float yaw) {
+static void PerkAdd(MapDef *m, PerkType t, float x, float y, float z, float yaw) {
     if (m->perkCount >= MAX_PERKSTATIONS) return;
     m->perks[m->perkCount].type = t;
-    m->perks[m->perkCount].pos = Vec3(x,0,z);
+    m->perks[m->perkCount].pos = Vec3(x,y,z);
     m->perks[m->perkCount].yaw = yaw;
     m->perkCount++;
 }
-static void PadAdd(MapDef *m, float x, float z, float ix, float iy, float iz) {
+static void PadAdd(MapDef *m, float x, float y, float z, float ix, float iy, float iz) {
     if (m->padCount >= MAX_JUMPPADS) return;
-    m->pads[m->padCount].pos = Vec3(x,0,z);
+    m->pads[m->padCount].pos = Vec3(x,y,z);
     m->pads[m->padCount].radius = 1.3f;
     m->pads[m->padCount].impulse = Vec3(ix,iy,iz);
     m->padCount++;
@@ -290,10 +290,11 @@ static void BuildTheater(MapDef *m) {
     WallBuyAdd(m, W_STAKEOUT, 7.0f, 1.5f, -25.9f, 0);
     WallBuyAdd(m, W_AK74U, 19.9f, 1.5f, 4.0f, 270);
     WallBuyAdd(m, W_M16, -13.7f, 5.7f, 8.4f, 90);
-    PerkAdd(m, PERK_REVIVE, 8.2f, 22.8f, 270);
-    PerkAdd(m, PERK_RAPID, -12.9f, -3.0f, 90);
-    PerkAdd(m, PERK_SWIFT, -6.8f, -25.4f, 0);
-    PerkAdd(m, PERK_REGEN, 19.4f, -10.8f, 0);
+    PerkAdd(m, PERK_REVIVE, 8.2f, 0, 22.8f, 270);
+    PerkAdd(m, PERK_RAPID, -12.9f, 0, -3.0f, 90);
+    PerkAdd(m, PERK_SWIFT, -6.8f, 0, -25.4f, 0);
+    PerkAdd(m, PERK_REGEN, 19.4f, 0, -10.8f, 0);
+    PerkAdd(m, PERK_STAMIN, -12.0f, 4.2f, 6.0f, 90);   // balcony
 
     // spawns
     SpawnAdd(m, 0, 12.6f, -1, false, 0);
@@ -435,10 +436,11 @@ static void BuildBunker(MapDef *m) {
     WallBuyAdd(m, W_HS10, 9.5f, 1.4f, -25.9f, 0);
     WallBuyAdd(m, W_ENFIELD, 29.9f, 1.4f, -11.5f, 0);
     WallBuyAdd(m, W_CZ75, 1.9f, 1.4f, 13.5f, 0);
-    PerkAdd(m, PERK_REVIVE, 4.8f, 10.8f, 180);
-    PerkAdd(m, PERK_SWIFT, -28.8f, 8.6f, 180);
-    PerkAdd(m, PERK_RAPID, 8.6f, -25.4f, 180);
-    PerkAdd(m, PERK_REGEN, 28.8f, 2.8f, 180);
+    PerkAdd(m, PERK_REVIVE, 4.8f, 0, 10.8f, 180);
+    PerkAdd(m, PERK_SWIFT, -28.8f, 0, 8.6f, 180);
+    PerkAdd(m, PERK_RAPID, 8.6f, 0, -25.4f, 180);
+    PerkAdd(m, PERK_REGEN, 28.8f, 0, 2.8f, 180);
+    PerkAdd(m, PERK_STAMIN, 0.0f, 0, 25.5f, 0);        // south field
 
     SpawnAdd(m, -30.5f, -0.5f, -1, false, 0);
     SpawnAdd(m, -30.5f, 6.5f, -1, false, 0);
@@ -568,10 +570,11 @@ static void BuildGraveyard(MapDef *m) {
     WallBuyAdd(m, W_STAKEOUT, 14.5f, 1.4f, -19.5f, 90);
     WallBuyAdd(m, W_M16, -29.5f, 1.4f, 20.5f, 90);
     WallBuyAdd(m, W_CZ75, 6.8f, 1.4f, 0.0f, 270);
-    PerkAdd(m, PERK_REVIVE, 5.8f, 30.5f, 180);
-    PerkAdd(m, PERK_REGEN, -5.8f, 30.5f, 180);
-    PerkAdd(m, PERK_SWIFT, 24.8f, -18.5f, 180);
-    PerkAdd(m, PERK_RAPID, -28.8f, 22.5f, 180);
+    PerkAdd(m, PERK_REVIVE, 5.8f, 0, 30.5f, 180);
+    PerkAdd(m, PERK_REGEN, -5.8f, 0, 30.5f, 180);
+    PerkAdd(m, PERK_SWIFT, 24.8f, 0, -18.5f, 180);
+    PerkAdd(m, PERK_RAPID, -28.8f, 0, 22.5f, 180);
+    PerkAdd(m, PERK_STAMIN, 0.0f, 0, 10.0f, 0);        // church steeple
 
     SpawnAdd(m, 0, -33.0f, -1, false, 0);
     SpawnAdd(m, -36.0f, -33.0f, -1, false, 0);
@@ -671,7 +674,7 @@ static void BuildDieArise(MapDef *m) {
     B(m, 15.6f, 8.0f, -30, 16, 8.9f, -22, TEX_CONCRETE);
     DC(m, 11.5f, 8.9f, -27.0f, 12.5f, 15.0f, -26.0f, TEX_METAL);
     // jump pad on tower B roof launches to the spire roof (player-only route)
-    PadAdd(m, 34.0f, -3.0f, -9.0f, 16.5f, -13.0f);
+    PadAdd(m, 34.0f, 0.0f, -3.0f, -10.0f, 19.0f, -10.0f);
     // zipline from spire back to A
     ZipAdd(m, Vec3(12.0f, 9.2f, -22.5f), Vec3(4.0f, 1.5f, 6.5f));
 
@@ -687,7 +690,7 @@ static void BuildDieArise(MapDef *m) {
     Stairs(m, -9.25f, -12.0f, 0, 1, 1.5f, 8.0f, 16, TEX_RUST, -8.0f);
     DC(m, -20.5f, -8, -12.5f, -19.0f, -6.6f, -11.0f, TEX_WOOD);
     DC(m, -18.5f, -8, -12.2f, -17.0f, -7.0f, -10.7f, TEX_WOOD);
-    PadAdd(m, -18.0f, -12.0f, 0, 16.0f, 0);
+    PadAdd(m, -18.0f, -8.0f, -12.0f, 0, 16.0f, 0);
     KillAdd(m, -60, -60, 60, 60, -25.0f);
 
     WallBuyAdd(m, W_OLYMPIA, -7.4f, 1.4f, -4.0f, 90);
@@ -695,10 +698,11 @@ static void BuildDieArise(MapDef *m) {
     WallBuyAdd(m, W_GALIL, -31.4f, 1.4f, 8.0f, 90);
     WallBuyAdd(m, W_PYTHON, 12.0f, 9.3f, -29.4f, 0);
     WallBuyAdd(m, W_MP5K, -21.4f, -6.6f, -2.0f, 90);
-    PerkAdd(m, PERK_REVIVE, 6.0f, -6.0f, 180);
-    PerkAdd(m, PERK_SWIFT, 36.0f, 5.0f, 180);
-    PerkAdd(m, PERK_REGEN, -30.0f, 14.0f, 180);
-    PerkAdd(m, PERK_RAPID, 5.5f, 2.5f, 180);
+    PerkAdd(m, PERK_REVIVE, 6.0f, 0, -6.0f, 180);
+    PerkAdd(m, PERK_SWIFT, 36.0f, 0, 5.0f, 180);
+    PerkAdd(m, PERK_REGEN, -30.0f, 0, 14.0f, 180);
+    PerkAdd(m, PERK_RAPID, 5.5f, 0, 2.5f, 180);
+    PerkAdd(m, PERK_STAMIN, 32.0f, 2.4f, 0.0f, 180);   // tower B deck
 
     SpawnAdd(m, -13.5f, 6.4f, -1, false, 0);   // corner platform (always)
     SpawnAdd(m, -26.0f, 15.0f, -1, false, 0);   // tower C (always)
@@ -749,14 +753,14 @@ static bool SolidAt(MapDef *m, int idx) {
     return true;
 }
 
-bool CollideMove(Vector3 *pos, Vector3 *vel, float radius, float height, float *groundYOut) {
+bool CollideMove(Vector3 *pos, Vector3 *vel, float radius, float height, float dt, float *groundYOut) {
     MapDef *m = &g.map;
     float groundY = -1e9;
     bool hitGround = false;
     Vector3 p = *pos;
 
-    // Y axis
-    p.y += vel->y;
+    // Y axis (velocity integrated over dt)
+    p.y += vel->y * dt;
     {
         AABB body = AABB_Make(Vec3(p.x-radius, p.y, p.z-radius), Vec3(p.x+radius, p.y+height, p.z+radius));
         for (int i = 0; i < m->boxCount; i++) {
@@ -785,7 +789,7 @@ bool CollideMove(Vector3 *pos, Vector3 *vel, float radius, float height, float *
 
     float atY = p.y;
     bool stepped = false;
-    float dx = vel->x, dz = vel->z;
+    float dx = vel->x * dt, dz = vel->z * dt;
     int steps = (int)ceilf(fmaxf(fabsf(dx), fabsf(dz)) / 0.2f);
     if (steps < 1) steps = 1;
     for (int s = 0; s < steps; s++) {
@@ -1042,7 +1046,7 @@ bool MapValidate(MapId id, char *err, int errSize) {
     if (m->boxCount == 0) FAIL("no boxes");
     if (m->spawnCount == 0) FAIL("no spawns");
     if (m->doorCount == 0) FAIL("no doors");
-    if (m->perkCount < 4) FAIL("needs 4 perk stations");
+    if (m->perkCount < 5) FAIL("needs 5 perk stations");
     if (m->wallbuyCount < 4) FAIL("needs >=4 wall buys");
     float gy = GroundHeightAt(m->playerStart.x, m->playerStart.z, m->playerStart.y + 0.6f);
     if (gy < -50) FAIL("player start has no ground");
@@ -1065,4 +1069,63 @@ bool MapValidate(MapId id, char *err, int errSize) {
     if (err) err[0] = 0;
     return true;
     #undef FAIL
+}
+
+// ============================================================================
+// 3D interactable props: perk machines, wall-buy chalks, ziplines, jump pads
+// ============================================================================
+void MapDrawInteractables(void) {
+    // perk machines (vending-machine boxes in the perk color)
+    for (int i = 0; i < g.map.perkCount; i++) {
+        PerkStation *ps = &g.map.perks[i];
+        Color pc = PERKS[ps->type].color;
+        Vector3 b = ps->pos;
+        GfxDrawBox(AABB_Make(Vec3(b.x-0.45f, b.y, b.z-0.28f), Vec3(b.x+0.45f, b.y+1.85f, b.z+0.28f)),
+                   TEX_METAL, (Color){ (unsigned char)(pc.r*3/4), (unsigned char)(pc.g*3/4), (unsigned char)(pc.b*3/4), 255 });
+        float pulse = 0.7f + 0.3f*sinf((float)g.time*3.0f + (float)i);
+        GfxDrawBox(AABB_Make(Vec3(b.x-0.35f, b.y+1.45f, b.z-0.30f), Vec3(b.x+0.35f, b.y+1.78f, b.z+0.30f)),
+                   TEX_GLASS, (Color){ pc.r, pc.g, pc.b, (unsigned char)(220*pulse) });
+        GfxDrawBox(AABB_Make(Vec3(b.x-0.18f, b.y+0.65f, b.z-0.30f), Vec3(b.x+0.18f, b.y+1.05f, b.z-0.22f)),
+                   TEX_METAL, (Color){ 25, 22, 20, 255 });
+    }
+    // wall buys: chalk gun silhouette on a dark board
+    for (int i = 0; i < g.map.wallbuyCount; i++) {
+        WallBuy *wb = &g.map.wallbuys[i];
+        float yawR = wb->yaw * DEG2RAD;
+        Vector3 fwd   = Vec3( sinf(yawR), 0, cosf(yawR));
+        Vector3 right = Vec3( cosf(yawR), 0, -sinf(yawR));
+        Vector3 c = Vec3Add(wb->pos, Vec3Scale(fwd, 0.04f));
+        Vector3 mn = Vec3Add(Vec3Add(c, Vec3Scale(right, -0.55f)), Vec3Scale(fwd, -0.05f));
+        Vector3 mx = Vec3Add(Vec3Add(c, Vec3Scale(right,  0.55f)), Vec3Scale(fwd,  0.05f));
+        mn.y = wb->pos.y - 0.45f; mx.y = wb->pos.y + 0.45f;
+        GfxDrawBox(AABB_Make(mn, mx), TEX_PLANK, (Color){ 34, 30, 26, 255 });
+        Color chalk = { 228, 226, 214, 235 };
+        Vector3 rot = { 0, wb->yaw, 0 };
+        GfxDrawCubePart(Vec3Add(c, Vec3Scale(right, -0.10f)), Vec3(0.26f, 0.09f, 0.06f), rot, chalk, AssetsTex(TEX_METAL));
+        GfxDrawCubePart(Vec3Add(Vec3Add(c, Vec3Scale(right, 0.18f)), Vec3(0, 0.03f, 0)), Vec3(0.30f, 0.035f, 0.035f), rot, chalk, AssetsTex(TEX_METAL));
+        GfxDrawCubePart(Vec3Add(Vec3Add(c, Vec3Scale(right, -0.02f)), Vec3(0, -0.10f, 0)), Vec3(0.08f, 0.12f, 0.05f), rot, chalk, AssetsTex(TEX_METAL));
+        GfxDrawCubePart(Vec3Add(Vec3Add(c, Vec3Scale(right, -0.28f)), Vec3(0, -0.03f, 0)), Vec3(0.16f, 0.07f, 0.05f), rot, chalk, AssetsTex(TEX_METAL));
+    }
+    // ziplines: posts + dotted cable
+    for (int i = 0; i < g.map.ziplineCount; i++) {
+        Zipline *z = &g.map.ziplines[i];
+        GfxDrawBox(AABB_Make(Vec3(z->a.x-0.09f, z->a.y-3.4f, z->a.z-0.09f), Vec3(z->a.x+0.09f, z->a.y+0.05f, z->a.z+0.09f)), TEX_METAL, (Color){70,72,76,255});
+        GfxDrawBox(AABB_Make(Vec3(z->b.x-0.09f, z->b.y-3.4f, z->b.z-0.09f), Vec3(z->b.x+0.09f, z->b.y+0.05f, z->b.z+0.09f)), TEX_METAL, (Color){70,72,76,255});
+        Vector3 d = Vec3Sub(z->b, z->a);
+        float len = Vec3Len(d);
+        int n = (int)(len / 0.35f);
+        for (int s = 0; s <= n; s++) {
+            Vector3 p = Vec3Add(z->a, Vec3Scale(d, (float)s / (n > 0 ? n : 1)));
+            GfxDrawCubePart(p, Vec3(0.06f, 0.06f, 0.06f), Vec3(0,0,0), (Color){60,62,66,255}, AssetsTex(TEX_METAL));
+        }
+    }
+    // jump pads: pulsing platforms
+    for (int i = 0; i < g.map.padCount; i++) {
+        JumpPad *jp = &g.map.pads[i];
+        float pulse = 0.6f + 0.4f*sinf((float)g.time*4.0f + (float)i*2.0f);
+        GfxDrawBox(AABB_Make(Vec3(jp->pos.x-1.05f, jp->pos.y+0.02f, jp->pos.z-1.05f), Vec3(jp->pos.x+1.05f, jp->pos.y+0.13f, jp->pos.z+1.05f)),
+                   TEX_METAL, (Color){ 40, 60, 80, 255 });
+        GfxDrawBox(AABB_Make(Vec3(jp->pos.x-0.8f, jp->pos.y+0.13f, jp->pos.z-0.8f), Vec3(jp->pos.x+0.8f, jp->pos.y+0.20f, jp->pos.z+0.8f)),
+                   TEX_GLASS, (Color){ 70, (unsigned char)(190*pulse), 255, 220 });
+    }
 }
