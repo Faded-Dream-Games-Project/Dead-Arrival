@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build raylib (static)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+          mkdir -p obj
+          for f in raylib-src/src/*.c; do
+            gcc -O1 -DPLATFORM_DESKTOP -U__STRICT_ANSI__ -Iraylib-src/src \
+              -Iraylib-src/src/external/glfw/include -c "$f" -o "obj/$(basename "${f%.c}").o"
+          done
+          ar rcs raylib.lib obj/*.o
+      - name: Build game
+        shell: cmd
+        run: |
+          gcc -O2 -Isrc -Iraylib-src/src src/*.c raylib.lib -o DeadArrival.exe ^
+            -lopengl32 -lgdi32 -lwinmm -static
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp DeadArrival.exe dist/
+          cp -r textures sfx dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeadArrival-Windows
+          path: dist
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl-dev
+      - name: Build raylib + game
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+          mkdir -p obj deps
+          for f in raylib-src/src/*.c; do
+            gcc -O2 -DPLATFORM_DESKTOP -D_GLFW_X11 -Iraylib-src/src \
+              -Iraylib-src/src/external/glfw/include -c "$f" -o "obj/$(basename "${f%.c}").o"
+          done
+          ar rcs deps/libraylib.a obj/*.o
+          make
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp deadarrival dist/
+          cp -r textures sfx dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeadArrival-Linux
+          path: dist

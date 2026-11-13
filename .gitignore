@@ -1,0 +1,8 @@
+*.o
+deadarrival
+dist/
+obj/
+raylib-src/
+deps/
+settings.cfg
+scores.cfg
