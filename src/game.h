@@ -19,7 +19,7 @@
 // Version / identity
 // ---------------------------------------------------------------------------
 #define GAME_TITLE        "Dead Arrival"
-#define GAME_VERSION      "0.1.1"
+#define GAME_VERSION      "0.1.2"
 #define ORG_NAME          "Faded Dream Games Project"
 
 // ---------------------------------------------------------------------------

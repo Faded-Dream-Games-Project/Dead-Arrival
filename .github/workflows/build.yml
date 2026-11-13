@@ -14,7 +14,7 @@ jobs:
       - name: Build raylib (static)
         shell: bash
         run: |
-          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+          git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
           mkdir -p obj
           for f in raylib-src/src/*.c; do
             gcc -O1 -DPLATFORM_DESKTOP -U__STRICT_ANSI__ -Iraylib-src/src \
@@ -41,10 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl-dev libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev
       - name: Build raylib + game
         run: |
-          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+          git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
           mkdir -p obj deps
           for f in raylib-src/src/*.c; do
             gcc -O2 -DPLATFORM_DESKTOP -D_GLFW_X11 -Iraylib-src/src \

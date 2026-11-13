@@ -1,11 +1,12 @@
 # Dead Arrival - build (Linux)
-# raylib 5.5 is cloned and built from source automatically on first build
+# raylib 6.2 is cloned and built from source automatically on first build
 # (static link). Windows: see .github/workflows/build.yml.
+# Extra system deps vs 5.5: libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev
 
 CC      ?= gcc
 CFLAGS  = -O2 -Wall -Wno-unused-variable -Wno-unused-function -std=c11
 IFLAGS  = -Isrc -Iraylib-src/src
-LDLIBS  = -lGL -lX11 -lXrandr -lXinerama -lXi -lXcursor -lasound -lpthread -ldl -lm
+LDLIBS  = -lGL -lX11 -lxcb -lXau -lXdmcp -lxkbcommon -lXrandr -lXinerama -lXi -lXcursor -lasound -lpthread -ldl -lm
 
 SRC     = $(wildcard src/*.c)
 OBJ     = $(SRC:.c=.o)
@@ -17,7 +18,7 @@ RLIB    = deps/libraylib.a
 all: $(BIN)
 
 raylib-src:
-	git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+	git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
 
 $(RLIB): | raylib-src
 	@mkdir -p obj deps

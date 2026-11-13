@@ -1,6 +1,6 @@
 # Dead Arrival
 
-A round-based zombies survival FPS written **fully in C** on [raylib](https://www.raylib.com/) 5.5.
+A round-based zombies survival FPS written **fully in C** on [raylib](https://www.raylib.com/) 6.2.
 COD-zombies-style difficulty curve: zombies get slowly tougher each round, you earn points
 for every hit and kill, buy weapons off walls, gamble on the Mystery Box, drink perk sodas,
 and open doors to expand the map — until you go down.
@@ -57,15 +57,17 @@ Download `DeadArrival.exe` from GitHub Actions artifacts (auto-built on every pu
 or build with MSYS2/MinGW:
 
 ```
-git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
 gcc -O2 -Isrc -Iraylib-src/src src/*.c raylib.lib -o DeadArrival.exe -lopengl32 -lgdi32 -lwinmm -static
 ```
 
 ### Linux
 ```
 sudo apt install libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl-dev
-git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
-# build raylib static lib into deps/libraylib.a (see CI workflow for exact flags)
+git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git raylib-src
+sudo apt-get install -y libasound2-dev libx11-dev libxcursor-dev libxrandr-dev \
+     libxinerama-dev libxi-dev libgl-dev libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev
+make   # builds raylib 6.2 + game
 make
 ./deadarrival
 ```
@@ -82,10 +84,9 @@ fallback at runtime so it always runs.
 playback device`, check `aplay -l` / pulseaudio / pipewire first. On a headless
 box there is simply no device and the game stays silent by design.
 
-**Built against raylib 6.x and something broke** — the game targets raylib 5.5
-(the Makefile clones and builds 5.5 automatically). raylib 6.x changed some
-audio/stream internals; if you link 6.x and hit issues, use `make` which pins
-5.5, or grab the prebuilt exe from Actions artifacts.
+**Link errors on Linux (xcb / xkbcommon / Xau undefined)** — raylib 6.x GLFW
+needs XCB; install `libxcb1-dev libxkbcommon-dev libxau-dev libxdmcp-dev`
+(the Makefile links them automatically, `sudo apt-get install` first).
 
 **Mouse stuck / free** — the cursor is captured automatically when a round
 starts and released on pause/menus (Esc). F11 toggles fullscreen.
