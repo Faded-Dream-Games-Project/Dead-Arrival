@@ -185,6 +185,7 @@ void GfxInit(void) {
     sCubeMesh = GenMeshCube(1.0f, 1.0f, 1.0f);
     sCubeMat = LoadMaterialDefault();
     sCubeMat.shader = sWorldShader;
+    GfxInitMaterials();
 
     memset(&sScene, 0, sizeof(sScene));
     sScene.flashStrength = 0.0f;
@@ -194,7 +195,6 @@ void GfxShutdown(void) {
     Gfx_MB_Reset();
     Gfx_MB_Build(); // frees built meshes
     for (int t = 0; t < TEX_COUNT; t++) if (sBuilders[t]) { free(sBuilders[t]->pos); free(sBuilders[t]->nor); free(sBuilders[t]->uv); free(sBuilders[t]->idx); free(sBuilders[t]); sBuilders[t] = NULL; }
-    UnloadMaterial(sCubeMat);
     UnloadMesh(sCubeMesh);
     UnloadShader(sWorldShader);
 }
@@ -231,44 +231,45 @@ void GfxSetFlash(Vector3 pos, float strength) {
 
 void GfxEnd(void) { EndMode3D(); }
 
+// Persistent scratch material. IMPORTANT: never UnloadMaterial() this - the
+// shader belongs to Gfx and raylib would unload it with the material.
+static Material sScratchMat;
+
+void GfxInitMaterials(void) { sScratchMat = LoadMaterialDefault(); }
+
 // Draw all static (merged) world geometry.
 void GfxDrawStatic(void) {
+    sScratchMat.shader = sWorldShader;
     for (int t = 0; t < TEX_COUNT; t++) {
         if (!sStaticValid[t]) continue;
-        Material mat = LoadMaterialDefault();
-        mat.shader = sWorldShader;
-        mat.maps[SHADER_LOC_MAP_DIFFUSE].texture = AssetsTex(t);
-        DrawMesh(sStaticMesh[t], mat, MatrixIdentity());
-        UnloadMaterial(mat);
+        sScratchMat.maps[MATERIAL_MAP_DIFFUSE].texture = AssetsTex(t);
+        sScratchMat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        DrawMesh(sStaticMesh[t], sScratchMat, MatrixIdentity());
     }
 }
 
 // Draw a single textured AABB (doors, dynamic boxes).
 void GfxDrawBox(AABB aabb, int tex, Color tint) {
-    Material mat = LoadMaterialDefault();
-    mat.shader = sWorldShader;
-    mat.maps[SHADER_LOC_MAP_DIFFUSE].texture = AssetsTex(tex);
-    mat.maps[SHADER_LOC_MAP_DIFFUSE].color = tint;
+    sScratchMat.shader = sWorldShader;
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].texture = AssetsTex(tex);
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
     Matrix m = MatrixIdentity();
     m.m0 = aabb.max.x - aabb.min.x; m.m5 = aabb.max.y - aabb.min.y; m.m10 = aabb.max.z - aabb.min.z;
     m.m12 = (aabb.min.x+aabb.max.x)/2; m.m13 = (aabb.min.y+aabb.max.y)/2; m.m14 = (aabb.min.z+aabb.max.z)/2;
-    DrawMesh(sCubeMesh, mat, m);
-    UnloadMaterial(mat);
+    DrawMesh(sCubeMesh, sScratchMat, m);
 }
 
 // Generic transformed tinted cube for models (zombies, guns, props).
 void GfxDrawCubePart(Vector3 pos, Vector3 size, Vector3 rotDeg, Color tint, Texture2D tex) {
-    Material mat = LoadMaterialDefault();
-    mat.shader = sWorldShader;
-    mat.maps[SHADER_LOC_MAP_DIFFUSE].texture = tex.id ? tex : AssetsTex(TEX_METAL);
-    mat.maps[SHADER_LOC_MAP_DIFFUSE].color = tint;
+    sScratchMat.shader = sWorldShader;
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].texture = tex.id ? tex : AssetsTex(TEX_METAL);
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
     Matrix m = MatrixIdentity();
     m = MatrixMultiply(m, MatrixTranslate(pos.x, pos.y, pos.z));
     if (rotDeg.x || rotDeg.y || rotDeg.z)
         m = MatrixMultiply(MatrixRotateXYZ(Vec3(rotDeg.x*DEG2RAD, rotDeg.y*DEG2RAD, rotDeg.z*DEG2RAD)), m);
     m = MatrixMultiply(MatrixScale(size.x, size.y, size.z), m);
-    DrawMesh(sCubeMesh, mat, m);
-    UnloadMaterial(mat);
+    DrawMesh(sCubeMesh, sScratchMat, m);
 }
 
 // Screen-space sky: vertical gradient with horizon placed from camera pitch.

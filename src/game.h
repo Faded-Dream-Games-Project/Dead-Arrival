@@ -362,6 +362,7 @@ void    GfxDrawSky(Camera3D cam, float playerPitchDeg);
 void    GfxDrawStatic(void);               // draw merged static geometry
 void    GfxDrawBox(AABB aabb, int tex, Color tint); // world box (dynamic)
 void    GfxDrawCubePart(Vector3 pos, Vector3 size, Vector3 rotDeg, Color tint, Texture2D tex);
+void    GfxInitMaterials(void);
 void    GfxEnd(void);
 // mesh-builder (static world geometry accumulation):
 void    Gfx_MB_Box(int tex, AABB box, float uvScale);
