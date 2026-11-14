@@ -181,15 +181,22 @@ bool AssetsHasTex(int id) { return sTexValid[id]; }
 // Audio playback helpers
 // ---------------------------------------------------------------------------
 static float sMasterVolume = 1.0f;
+static float sSfxVolume = 1.0f;
+static float sMusicVolSetting = 1.0f;
 
-void SfxSetVolume(float v) { sMasterVolume = CLAMP(v, 0, 1); }
+void SfxSetVolume(float master, float sfx) {
+    sMasterVolume = CLAMP(master, 0, 1);
+    sSfxVolume = CLAMP(sfx, 0, 1);
+}
+
+void SfxSetMusicVolume(float v) { sMusicVolSetting = CLAMP(v, 0, 1); }
 
 void SfxPlay(int id, float pitch, float vol) {
     if (id < 0 || id >= SND_COUNT) return;
     if (!sSndValid[id]) return;
     Sound s = sSnd[id];
     SetSoundPitch(s, pitch > 0 ? pitch : 1.0f);
-    SetSoundVolume(s, sMasterVolume * CLAMP(vol, 0, 1));
+    SetSoundVolume(s, sMasterVolume * sSfxVolume * CLAMP(vol, 0, 1));
     PlaySound(s);
 }
 
@@ -202,7 +209,7 @@ void MusicStart(int mapId) {
         sMusic = LoadMusicStream(path);
         if (sMusic.stream.buffer != NULL) {
             sMusic.looping = true;
-            SetMusicVolume(sMusic, 0.55f*sMasterVolume);
+            SetMusicVolume(sMusic, 0.55f*sMasterVolume*sMusicVolSetting);
             PlayMusicStream(sMusic);
             sMusicValid = true;
         }
@@ -214,5 +221,8 @@ void MusicStop(void) {
 }
 
 void MusicUpdate(void) {
-    if (sMusicValid) UpdateMusicStream(sMusic);
+    if (sMusicValid) {
+        UpdateMusicStream(sMusic);
+        SetMusicVolume(sMusic, 0.55f*sMasterVolume*sMusicVolSetting);
+    }
 }

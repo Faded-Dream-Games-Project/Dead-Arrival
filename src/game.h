@@ -19,7 +19,7 @@
 // Version / identity
 // ---------------------------------------------------------------------------
 #define GAME_TITLE        "Dead Arrival"
-#define GAME_VERSION      "0.1.2"
+#define GAME_VERSION      "dev"
 #define ORG_NAME          "Faded Dream Games Project"
 
 // ---------------------------------------------------------------------------
@@ -226,6 +226,8 @@ typedef struct MapDef {
     float       fogDensity;           // exp2 density
     Vector3     sunDir;               // normalized
     Color       sunColor, ambient;
+    Vector3     fillDir;              // hemisphere/fill light direction
+    Color       fillColor;            // fill light color
     Vector3     playerStart;
     float       playerYaw;
 } MapDef;
@@ -252,6 +254,16 @@ typedef struct Zombie {
     float    groundY;
     bool     runner;
 } Zombie;
+
+// ---------------------------------------------------------------------------
+// Rebindable key actions (settings)
+// ---------------------------------------------------------------------------
+typedef enum {
+    ACT_FWD = 0, ACT_BACK, ACT_LEFT, ACT_RIGHT, ACT_JUMP, ACT_SPRINT, ACT_CROUCH,
+    ACT_USE, ACT_RELOAD, ACT_KNIFE, ACT_WEP1, ACT_WEP2, ACT_WEP3, ACT_SWAP,
+    ACT_SHAKE,                       // hard mode: mash to shake the flashlight
+    ACT_COUNT
+} KeyAction;
 
 // ---------------------------------------------------------------------------
 // Particles
@@ -341,7 +353,19 @@ typedef struct Game {
     float       menuBlur;
     int         bestRound[MAP_COUNT];
     // settings (persisted)
-    float       sens, volume, fovSetting;
+    float       sens;                  // 0.2 .. 10.0 (slider maps 0..1 -> exponential)
+    float       volMaster, volMusic, volSfx;
+    float       brightness;            // 0.5 .. 1.5
+    float       fovSetting;            // 60 .. 120
+    bool        invertY;
+    bool        fullscreen;
+    bool        vsync;
+    bool        hardMode;              // play-menu toggle (not persisted)
+    bool        shakeByMouse;          // hard mode: mouse-move vs key-mash shake
+    int         keys[ACT_COUNT];       // KeyboardKey per action
+    // torch (hard mode flashlight)
+    float       torchCharge;           // 0..1, fed by shaking, drains constantly
+    float       torchShakeAnim;        // visual jolt
     // runtime flags
     bool        windowShouldClose;
     double      time;
@@ -357,7 +381,8 @@ void    GfxInit(void);
 void    GfxShutdown(void);
 Shader* GfxWorldShader(void);
 void    GfxBegin(Camera3D cam);            // begin 3D w/ world shader consts
-void    GfxSetScene(Vector3 sunDir, Color sunColor, Color ambient, Color fogColor, float fogDensity);
+void    GfxSetScene(Vector3 sunDir, Color sunColor, Color ambient, Vector3 fillDir, Color fillColor, Color fogColor, float fogDensity);
+void    GfxSetTorch(Vector3 pos, Vector3 dir, float strength);   // hard-mode flashlight spot
 void    GfxSetFlash(Vector3 pos, float strength);   // muzzle flash point light
 void    GfxDrawSky(Camera3D cam, float playerPitchDeg);
 void    GfxDrawStatic(void);               // draw merged static geometry
@@ -378,7 +403,8 @@ void    AssetsUnload(void);
 Texture2D AssetsTex(int id);
 bool    AssetsHasTex(int id);
 void    SfxPlay(int id, float pitch, float vol);
-void    SfxSetVolume(float v);
+void    SfxSetVolume(float master, float sfx);
+void    SfxSetMusicVolume(float v);
 void    MusicStart(int mapId);
 void    MusicStop(void);
 void    MusicUpdate(void);
@@ -452,6 +478,7 @@ void    HudDrawSettings(void);
 void    HudDrawPause(void);
 void    HudDrawGameOver(void);
 void    HudDrawOverlay(void);
+bool    HudCapturingKey(void);       // settings key-rebind capture active
 void    ParticlesSpawn(Vector3 pos, Vector3 vel, Color c, float size, float life, bool grav);
 void    ParticlesUpdate(void);
 void    ParticlesDraw(Camera3D cam);
@@ -464,12 +491,17 @@ float   HudTextWidth(const char *s, int size);
 void    GameStart(MapId id);
 void    GameReset(void);
 void    GameOverSequence(void);
+void    ApplyHardModeScene(void);   // dark fog/ambient + torch after GfxSetScene
+void    TorchUpdate(void);          // hard-mode flashlight shake/drain logic
 void    AddPoints(int n);
 void    SaveSettings(void);
 void    LoadSettings(void);
 void    SaveScores(void);
 void    LoadScores(void);
 bool    UiButton(Rectangle r, const char *text, int fontSize);
+const char *ActName(KeyAction a);   // key-binding display names
+bool    ActPressed(KeyAction a);    // rebindable "pressed this frame"
+bool    ActDown(KeyAction a);       // rebindable "held down"
 
 // ---------------------------------------------------------------------------
 // Utility math on Vector3

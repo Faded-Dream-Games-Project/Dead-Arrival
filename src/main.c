@@ -10,25 +10,82 @@ Game g;
 // ---------------------------------------------------------------------------
 // Persistence (settings + best rounds) next to the binary
 // ---------------------------------------------------------------------------
+static const int DEF_KEYS[ACT_COUNT] = {
+    [ACT_FWD]    = KEY_W,   [ACT_BACK]  = KEY_S,   [ACT_LEFT]  = KEY_A,
+    [ACT_RIGHT]  = KEY_D,   [ACT_JUMP]  = KEY_SPACE,[ACT_SPRINT]= KEY_LEFT_SHIFT,
+    [ACT_CROUCH] = KEY_LEFT_CONTROL,    [ACT_USE]   = KEY_E,
+    [ACT_RELOAD] = KEY_R,   [ACT_KNIFE] = KEY_F,   [ACT_WEP1]  = KEY_ONE,
+    [ACT_WEP2]   = KEY_TWO, [ACT_WEP3]  = KEY_THREE,[ACT_SWAP]  = KEY_Q,
+    [ACT_SHAKE]  = KEY_F,
+};
+
+static const char *KEY_NAMES[ACT_COUNT] = {
+    "Forward", "Back", "Left", "Right", "Jump", "Sprint", "Crouch",
+    "Interact", "Reload", "Knife", "Weapon 1", "Weapon 2", "Weapon 3", "Swap",
+    "Shake Torch",
+};
+
+const char *ActName(KeyAction a) {
+    return (a >= 0 && a < ACT_COUNT) ? KEY_NAMES[a] : "?";
+}
+
+bool ActPressed(KeyAction a) { return IsKeyPressed((KeyboardKey)g.keys[a]); }
+bool ActDown(KeyAction a)    { return IsKeyDown((KeyboardKey)g.keys[a]); }
+
+static void SetDefaults(void) {
+    g.sens = 1.0f;
+    g.volMaster = 0.8f; g.volMusic = 0.8f; g.volSfx = 0.9f;
+    g.brightness = 1.0f;
+    g.fovSetting = 75.0f;
+    g.invertY = false;
+    g.fullscreen = false;
+    g.vsync = true;
+    g.shakeByMouse = true;
+    for (int i = 0; i < ACT_COUNT; i++) g.keys[i] = DEF_KEYS[i];
+}
+
 void SaveSettings(void) {
     FILE *f = fopen("settings.cfg", "w");
     if (!f) return;
-    fprintf(f, "sens %.3f\nvolume %.3f\nfov %.1f\n", g.sens, g.volume, g.fovSetting);
+    fprintf(f, "sens %.3f\n", g.sens);
+    fprintf(f, "volMaster %.3f\nvolMusic %.3f\nvolSfx %.3f\n", g.volMaster, g.volMusic, g.volSfx);
+    fprintf(f, "brightness %.3f\n", g.brightness);
+    fprintf(f, "fov %.1f\n", g.fovSetting);
+    fprintf(f, "invertY %d\nfullscreen %d\nvsync %d\nshakeMouse %d\n",
+            g.invertY ? 1 : 0, g.fullscreen ? 1 : 0, g.vsync ? 1 : 0, g.shakeByMouse ? 1 : 0);
+    for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "key %d %d\n", i, g.keys[i]);
     fclose(f);
 }
+
 void LoadSettings(void) {
-    g.sens = 1.0f; g.volume = 0.8f; g.fovSetting = 75.0f;
+    SetDefaults();
     FILE *f = fopen("settings.cfg", "r");
     if (!f) return;
     char key[32];
     while (fscanf(f, "%31s", key) == 1) {
-        if (!strcmp(key, "sens")) fscanf(f, "%f", &g.sens);
-        else if (!strcmp(key, "volume")) fscanf(f, "%f", &g.volume);
-        else if (!strcmp(key, "fov")) fscanf(f, "%f", &g.fovSetting);
+        if      (!strcmp(key, "sens"))       { fscanf(f, "%f", &g.sens); }
+        else if (!strcmp(key, "volume"))     { fscanf(f, "%f", &g.volMaster); }  // old format
+        else if (!strcmp(key, "volMaster"))  { fscanf(f, "%f", &g.volMaster); }
+        else if (!strcmp(key, "volMusic"))   { fscanf(f, "%f", &g.volMusic); }
+        else if (!strcmp(key, "volSfx"))     { fscanf(f, "%f", &g.volSfx); }
+        else if (!strcmp(key, "brightness")) { fscanf(f, "%f", &g.brightness); }
+        else if (!strcmp(key, "fov"))        { fscanf(f, "%f", &g.fovSetting); }
+        else if (!strcmp(key, "invertY"))    { int v; if (fscanf(f, "%d", &v) == 1) g.invertY = v != 0; }
+        else if (!strcmp(key, "fullscreen")) { int v; if (fscanf(f, "%d", &v) == 1) g.fullscreen = v != 0; }
+        else if (!strcmp(key, "vsync"))      { int v; if (fscanf(f, "%d", &v) == 1) g.vsync = v != 0; }
+        else if (!strcmp(key, "shakeMouse")) { int v; if (fscanf(f, "%d", &v) == 1) g.shakeByMouse = v != 0; }
+        else if (!strcmp(key, "key"))        {
+            int idx, code;
+            if (fscanf(f, "%d %d", &idx, &code) == 2 &&
+                idx >= 0 && idx < ACT_COUNT && code > 0 && code < 512) g.keys[idx] = code;
+        }
     }
     fclose(f);
-    g.sens = CLAMP(g.sens, 0.2f, 2.0f);
-    g.volume = CLAMP(g.volume, 0, 1);
+    g.sens = CLAMP(g.sens, 0.2f, 10.0f);
+    g.volMaster = CLAMP(g.volMaster, 0, 1);
+    g.volMusic = CLAMP(g.volMusic, 0, 1);
+    g.volSfx = CLAMP(g.volSfx, 0, 1);
+    g.brightness = CLAMP(g.brightness, 0.5f, 1.5f);
     g.fovSetting = CLAMP(g.fovSetting, 60, 120);
 }
 void SaveScores(void) {
@@ -67,6 +124,50 @@ void GameReset(void) {
     SeedRng((uint32_t)(GetTime() * 1000) | 1);
 }
 
+void ApplyHardModeScene(void) {
+    // hard mode: back to the old (pre-polish) darkness, torch is the lifeline
+    if (!g.hardMode) return;
+    Color amb = g.map.ambient;
+    amb.r = (unsigned char)(amb.r * 0.35f);
+    amb.g = (unsigned char)(amb.g * 0.35f);
+    amb.b = (unsigned char)(amb.b * 0.35f);
+    GfxSetScene(g.map.sunDir, g.map.sunColor, amb,
+                Vec3(0, 1, 0), (Color){ 0, 0, 0, 255 },   // no fill light
+                g.map.fogColor, g.map.fogDensity * 1.6f);
+}
+
+void TorchUpdate(void) {
+    if (!g.hardMode) return;
+    // charge feeds on shaking, drains over ~14 s from full
+    g.torchCharge -= (float)g.dt / 14.0f;
+    if (g.torchCharge < 0) g.torchCharge = 0;
+    if (g.torchShakeAnim > 0) g.torchShakeAnim -= (float)g.dt * 3.0f;
+
+    // input: mouse-move shaking or key mashing (Controls setting)
+    bool shook = false;
+    if (g.shakeByMouse) {
+        Vector2 md = GetMouseDelta();
+        float speed = fabsf(md.x) + fabsf(md.y);
+        // vigorous swiping feeds the torch; gentle aiming barely does
+        if (speed > 26.0f) {
+            g.torchCharge += speed * 0.0011f * (float)g.dt * 60.0f;
+            g.torchShakeAnim = 1.0f;
+            shook = true;
+        }
+    } else {
+        static bool shakeHeld = false;
+        bool down = ActDown(ACT_SHAKE);
+        if (down && !shakeHeld) {
+            g.torchCharge += 0.035f;
+            g.torchShakeAnim = 1.0f;
+            shook = true;
+        }
+        shakeHeld = down;
+    }
+    if (g.torchCharge > 1) g.torchCharge = 1;
+    (void)shook;
+}
+
 void GameStart(MapId id) {
     GameReset();
     g.mapId = id;
@@ -76,10 +177,30 @@ void GameStart(MapId id) {
     ZombiesInitRound();
     g.roundBannerActive = true;
     g.roundBannerTime = 3.0f;
-    GfxSetScene(g.map.sunDir, g.map.sunColor, g.map.ambient, g.map.fogColor, g.map.fogDensity);
+    GfxSetScene(g.map.sunDir, g.map.sunColor, g.map.ambient, g.map.fillDir, g.map.fillColor, g.map.fogColor, g.map.fogDensity);
+    ApplyHardModeScene();
     g.fovCur = g.fovSetting;
+    g.torchCharge = 0.85f;
     MusicStart(id);
     g.state = STATE_PLAYING;
+}
+
+// Torch light for the current frame (called right before GfxBegin).
+static void UpdateTorchLight(Camera3D cam) {
+    if (!g.hardMode) { GfxSetTorch(cam.position, Vec3(0,0,1), 0.0f); return; }
+    // aim straight ahead from the camera
+    Vector3 fwd = Vec3Norm(Vec3Sub(cam.target, cam.position));
+    // charge -> strength with a soft knee; dead torch = nothing
+    float s = g.torchCharge;
+    float strength = s <= 0 ? 0 : (0.55f + 0.45f * s) * (2.6f + 2.4f * s);
+    // flicker: worse the emptier it gets (once there's any charge)
+    if (s > 0) {
+        float flick = 1.0f - 0.35f * (1.0f - s) * (0.5f + 0.5f * sinf((float)g.time * 17.0f));
+        strength *= flick;
+    }
+    // shake jolt briefly widens/brightens it
+    if (g.torchShakeAnim > 0) strength *= 1.0f + 0.35f * g.torchShakeAnim;
+    GfxSetTorch(cam.position, fwd, strength);
 }
 
 void GameOverSequence(void) {
@@ -88,6 +209,26 @@ void GameOverSequence(void) {
     SaveScores();
     MusicStop();
     SfxPlay(SND_DOWN, 0.8f, 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Brightness: post-draw gamma-ish overlay (black veil or white lift)
+// ---------------------------------------------------------------------------
+static void ApplyBrightness(void) {
+    if (g.brightness >= 0.995f && g.brightness <= 1.005f) return;
+    int w = GetScreenWidth(), h = GetScreenHeight();
+    if (g.brightness < 1.0f) {
+        // darken: translucent black veil
+        DrawRectangle(0, 0, w, h, (Color){ 0, 0, 0, (unsigned char)((1.0f - g.brightness) * 220) });
+    } else {
+        // brighten: additive-ish white lift via repeated soft passes
+        float over = g.brightness - 1.0f;
+        int passes = (int)(over / 0.05f) + 1;
+        if (passes > 10) passes = 10;
+        unsigned char a = (unsigned char)(over * 255.0f / (passes * 2.2f));
+        for (int i = 0; i < passes; i++)
+            DrawRectangle(0, 0, w, h, (Color){ 255, 250, 240, a });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +299,16 @@ static int RunSelftest(void) {
                ok ? "OK" : "FAIL: ", ok ? "" : err);
         if (!ok) fails++;
     }
+    // settings sanity (persisted defaults round-trip)
+    {
+        Game check = g;   // save current
+        g.volMaster = -1; g.sens = 99;   // out-of-range values
+        LoadSettings();
+        bool ok = g.sens >= 0.2f && g.sens <= 10.0f && g.volMaster >= 0 && g.volMaster <= 1;
+        printf("settings clamp: %s\n", ok ? "OK" : "FAIL");
+        if (!ok) fails++;
+        g = check;   // restore
+    }
     printf(fails == 0 ? "SELFTEST PASSED\n" : "SELFTEST FAILED (%d)\n", fails);
     return fails;
 }
@@ -171,7 +322,9 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
     InitAudioDevice();
     SetTargetFPS(60);
     LoadSettings(); LoadScores();
-    SfxSetVolume(g.volume);
+    SfxSetVolume(g.volMaster, g.volSfx);
+    // CI/headless hook: SMOKE_HARD=1 runs the smoke in hard mode (torch test)
+    if (getenv("SMOKE_HARD")) g.hardMode = true;
     AssetsLoad();
     HudInitFont();
     GfxInit();
@@ -200,10 +353,12 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
         g.player.yaw += dt * 12.0f;
         g.player.pitch = 5.0f;
         HudUpdate();
+        TorchUpdate();
         ZombiesUpdate();
         BoxUpdate();
         // draw
         Camera3D cam = BuildCamera();
+        UpdateTorchLight(cam);
         BeginDrawing();
         ClearBackground(g.map.fogColor);
         GfxDrawSky(cam, g.player.pitch);
@@ -256,13 +411,15 @@ int main(int argc, char **argv) {
     }
 
     memset(&g, 0, sizeof(g));
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+    LoadSettings();          // read early: window flags depend on settings
+    SetConfigFlags(FLAG_MSAA_4X_HINT | (g.vsync ? FLAG_VSYNC_HINT : 0) |
+                   (g.fullscreen ? FLAG_FULLSCREEN_MODE : 0));
     InitWindow(1280, 720, GAME_TITLE);
     InitAudioDevice();
-    SetTargetFPS(60);
+    SetTargetFPS(g.vsync ? 60 : 0);   // 0 = uncapped
     SetExitKey(KEY_NULL);      // handle ESC ourselves
-    LoadSettings(); LoadScores();
-    SfxSetVolume(g.volume);
+    LoadScores();
+    SfxSetVolume(g.volMaster, g.volSfx);
     AssetsLoad();
     HudInitFont();
     GfxInit();
@@ -285,6 +442,7 @@ int main(int argc, char **argv) {
         // global keys
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (g.overlay != OVERLAY_NONE) g.overlay = OVERLAY_NONE;
+            else if (g.state == STATE_SETTINGS && HudCapturingKey()) { /* swallow: rebinding */ }
             else if (g.state == STATE_PLAYING) { g.state = STATE_PAUSED; SaveSettings(); }
             else if (g.state == STATE_PAUSED) g.state = STATE_PLAYING;
             else if (g.state == STATE_MAPSELECT || g.state == STATE_SETTINGS) g.state = STATE_TITLE;
@@ -295,6 +453,7 @@ int main(int argc, char **argv) {
         switch (g.state) {
         case STATE_PLAYING:
             HudUpdate();
+            TorchUpdate();
             if (!g.player.downed) WeaponsUpdate();
             else WeaponsUpdate(); // allow knife? no - skip fire while downed
             PlayerUpdate();
@@ -315,6 +474,7 @@ int main(int argc, char **argv) {
         BeginDrawing();
         if (g.state == STATE_PLAYING || g.state == STATE_PAUSED || g.state == STATE_GAMEOVER) {
             Camera3D cam = BuildCamera();
+            UpdateTorchLight(cam);
             ClearBackground(g.map.fogColor);
             GfxDrawSky(cam, g.player.pitch);
             GfxBegin(cam);
@@ -332,6 +492,7 @@ int main(int argc, char **argv) {
         } else {
             ClearBackground(BLACK);
         }
+        ApplyBrightness();
         HudDraw();
         EndDrawing();
     }

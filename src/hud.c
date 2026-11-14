@@ -212,6 +212,25 @@ void HudDrawGameplay(void) {
     char zleft[48];
     snprintf(zleft, sizeof zleft, "%d left", left > 0 ? left : 0);
     T(zleft, 32, 64, 20, (Color){225, 210, 205, 220}, true);
+    if (g.hardMode) T("HARD MODE", 32, 88, 18, (Color){255, 120, 60, 230}, true);
+
+    // ---- torch charge (hard mode) ----
+    if (g.hardMode) {
+        int tx = 30, ty = h - 130;
+        DrawRectangle(tx, ty, 150, 12, (Color){20, 8, 8, 180});
+        float frac = CLAMP(g.torchCharge, 0, 1);
+        Color tc = frac > 0.5f ? (Color){255, 220, 120, 255} :
+                   frac > 0.2f ? (Color){255, 170, 60, 255} : (Color){255, 80, 40, 255};
+        DrawRectangle(tx+2, ty+2, (int)((150-4) * frac), 8, tc);
+        const char *lbl = "TORCH";
+        T(lbl, tx, ty - 20, 16, (Color){225, 210, 190, 200}, true);
+        if (frac <= 0.001f) {
+            float pulse = 0.5f + 0.5f * sinf((float)g.time * 6.0f);
+            const char *warn = "SHAKE THE TORCH!";
+            T(warn, w/2 - MeasureText(warn, 24)/2, h*0.62f, 24,
+              (Color){255, 200, 120, (unsigned char)(160 + 90*pulse)}, true);
+        }
+    }
 
     // ---- top right: points ----
     char pts[48];
@@ -288,7 +307,22 @@ void HudDrawTitle(void) {
     if (UiButton(bQuit,  "QUIT", 22)) g.windowShouldClose = true;
 
     T("v" GAME_VERSION "  -  " ORG_NAME, 14, h - 26, 16, (Color){150, 140, 140, 200}, false);
-    T("WASD move - Mouse aim - E interact - R reload - Shift sprint - 1/2/3 weapons - V knife", 14, h - 46, 16, (Color){160, 150, 150, 180}, false);
+    T("WASD move - Mouse aim - E interact - R reload - Shift sprint - 1/2/3 weapons - F knife", 14, h - 46, 16, (Color){160, 150, 150, 180}, false);
+    T("rebind keys and tune everything in SETTINGS", 14, h - 66, 14, (Color){130, 120, 120, 170}, false);
+}
+
+static bool UiToggle(Rectangle r, bool on, const char *text, int fontSize) {
+    bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+    Color fill = on ? (Color){70, 24, 18, 235} : (Color){24, 12, 12, 215};
+    Color border = on ? (Color){230, 90, 50, 255} : (Color){100, 40, 34, 255};
+    DrawRectangleRec(r, fill);
+    DrawRectangleLinesEx(r, 2, border);
+    // little indicator lamp
+    DrawCircle((int)(r.x + 22), (int)(r.y + r.height/2), 7, on ? (Color){255, 140, 60, 255} : (Color){60, 34, 30, 255});
+    int tw = MeasureText(text, fontSize);
+    DrawText(text, (int)(r.x + 40 + (r.width - 40 - tw)/2), (int)(r.y + r.height/2 - fontSize/2), fontSize,
+             on ? RAYWHITE : (Color){190, 175, 170, 255});
+    return hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 }
 
 void HudDrawMapSelect(void) {
@@ -320,48 +354,197 @@ void HudDrawMapSelect(void) {
             GameStart((MapId)i);
         }
     }
+    // hard mode toggle under the list
+    Rectangle hm = { w/2.0f - 160, 130.0f + MAP_COUNT * 108 + 14, 320, 48 };
+    if (UiToggle(hm, g.hardMode, g.hardMode ? "HARD MODE: ON" : "HARD MODE: OFF", 22)) {
+        g.hardMode = !g.hardMode;
+        SfxPlay(SND_BUY, g.hardMode ? 0.8f : 1.1f, 0.6f);
+    }
+    if (g.hardMode) {
+        const char *hd = "Darker. Your flashlight only works while you keep shaking it.";
+        T(hd, w/2 - MeasureText(hd, 17)/2, (int)(hm.y + hm.height + 8), 17, (Color){235, 170, 120, 220}, false);
+    }
     T("ESC to go back", 20, h - 30, 18, (Color){160, 150, 150, 200}, false);
+}
+
+// ---------------------------------------------------------------------------
+// Settings menu: tabs (Game / Audio / Video / Controls)
+// ---------------------------------------------------------------------------
+enum { SET_TAB_GAME = 0, SET_TAB_AUDIO, SET_TAB_VIDEO, SET_TAB_CONTROLS, SET_TAB_COUNT };
+static int sSetTab = SET_TAB_GAME;
+static int sRebindAction = -1;      // action currently waiting for a key
+static float sSliderFlash = 0;      // feedback when a slider is dragged
+
+// true while the Controls tab is capturing a key press (ESC must not exit)
+bool HudCapturingKey(void) { return sRebindAction >= 0; }
+
+// slider helper: returns true when the value changed this frame
+static bool UiSlider(Rectangle bar, float *val, float min, float max, const char *label,
+                     const char *valText, int x, int y) {
+    T(label, x, y, 22, RAYWHITE, false);
+    Rectangle track = { x + 240.0f, (float)y + 6, 340, 14 };
+    bool changed = false;
+    Vector2 mp = GetMousePosition();
+    if (CheckCollisionPointRec(mp, (Rectangle){ track.x, track.y - 8, track.width, track.height + 16 }) &&
+        IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        float t = CLAMP((mp.x - track.x) / track.width, 0, 1);
+        *val = min + t * (max - min);
+        changed = true;
+    }
+    DrawRectangleRec(track, (Color){30, 12, 12, 255});
+    float frac = CLAMP((*val - min) / (max - min), 0, 1);
+    DrawRectangleRec((Rectangle){ track.x, track.y, track.width * frac, track.height }, (Color){220, 60, 45, 255});
+    DrawCircle((int)(track.x + track.width * frac), (int)(track.y + track.height/2), 8, RAYWHITE);
+    T(valText, (int)(track.x + track.width + 16), y, 20, RAYWHITE, false);
+    (void)bar;
+    return changed;
 }
 
 void HudDrawSettings(void) {
     int w = GetScreenWidth(), h = GetScreenHeight();
     DrawRectangleGradientV(0, 0, w, h, (Color){10, 5, 7, 255}, (Color){3, 2, 2, 255});
-    T("SETTINGS", w/2 - MeasureText("SETTINGS", 44)/2, 60, 44, (Color){225, 60, 45, 255}, true);
+    T("SETTINGS", w/2 - MeasureText("SETTINGS", 44)/2, 34, 44, (Color){225, 60, 45, 255}, true);
 
-    // sensitivity
-    T("Mouse Sensitivity", 200, 200, 24, RAYWHITE, false);
-    Rectangle sBar = { 200, 240, 400, 18 };
-    DrawRectangleRec(sBar, (Color){30, 12, 12, 255});
-    DrawRectangleRec((Rectangle){ 200, 240, 400 * g.sens / 2.0f, 18 }, (Color){220, 60, 45, 255});
-    char sv[32]; snprintf(sv, sizeof sv, "%.2f", g.sens);
-    T(sv, 620, 238, 22, RAYWHITE, false);
-    if (CheckCollisionPointRec(GetMousePosition(), sBar) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        g.sens = CLAMP((GetMousePosition().x - 200) / 400 * 2.0f, 0.2f, 2.0f);
+    // tabs
+    const char *tabNames[SET_TAB_COUNT] = { "GAME", "AUDIO", "VIDEO", "CONTROLS" };
+    int tabW = 150;
+    for (int i = 0; i < SET_TAB_COUNT; i++) {
+        Rectangle tr = { w/2.0f - (SET_TAB_COUNT*tabW)/2.0f + i*tabW, 92, (float)tabW - 6, 40 };
+        bool active = sSetTab == i;
+        bool hover = CheckCollisionPointRec(GetMousePosition(), tr);
+        DrawRectangleRec(tr, active ? (Color){70, 20, 24, 235} : hover ? (Color){45, 16, 15, 235} : (Color){26, 11, 11, 215});
+        DrawRectangleLinesEx(tr, 2, active ? (Color){230, 70, 55, 255} : (Color){100, 38, 34, 255});
+        int tw = MeasureText(tabNames[i], 20);
+        DrawText(tabNames[i], (int)(tr.x + (tr.width - tw)/2), (int)(tr.y + tr.height/2 - 10), 20,
+                 active ? RAYWHITE : (Color){190, 175, 170, 255});
+        if (hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && sRebindAction < 0) sSetTab = i;
     }
-    // volume
-    T("Master Volume", 200, 300, 24, RAYWHITE, false);
-    Rectangle vBar = { 200, 340, 400, 18 };
-    DrawRectangleRec(vBar, (Color){30, 12, 12, 255});
-    DrawRectangleRec((Rectangle){ 200, 340, 400 * g.volume, 18 }, (Color){220, 60, 45, 255});
-    char vv[32]; snprintf(vv, sizeof vv, "%.0f%%", g.volume * 100);
-    T(vv, 620, 338, 22, RAYWHITE, false);
-    if (CheckCollisionPointRec(GetMousePosition(), vBar) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        g.volume = CLAMP((GetMousePosition().x - 200) / 400, 0, 1);
-        SfxSetVolume(g.volume);
+    int leftX = w/2 - 430;
+    int rowY = 170;
+    char vt[48];
+
+    if (sSetTab == SET_TAB_GAME) {
+        // sensitivity: exponential slider 0.2 .. 10 so the middle (~1.4) is
+        // a natural aiming speed and the top end is 5x the old max
+        float t = logf(g.sens / 0.2f) / logf(50.0f);   // 0..1
+        snprintf(vt, sizeof vt, "%.2f", g.sens);
+        Rectangle sb = { 0,0,0,0 };
+        float tt = t;
+        if (UiSlider(sb, &tt, 0.0f, 1.0f, "Mouse Sensitivity", vt, leftX, rowY)) {
+            g.sens = 0.2f * powf(50.0f, CLAMP(tt, 0, 1));
+        }
+        T("low - high (max is 5x the old limit)", leftX + 240, rowY + 26, 14, (Color){150, 140, 140, 200}, false);
+        int fy = rowY + 70;
+        if (UiToggle((Rectangle){ (float)leftX, (float)fy, 340, 44 }, g.invertY, "Invert Y Axis", 20)) {
+            g.invertY = !g.invertY;
+        }
+        T("FOV, brightness, audio and keys live in the other tabs.", leftX, fy + 60, 16, (Color){170, 158, 155, 210}, false);
     }
-    // FOV
-    T("Field of View", 200, 400, 24, RAYWHITE, false);
-    Rectangle fBar = { 200, 440, 400, 18 };
-    DrawRectangleRec(fBar, (Color){30, 12, 12, 255});
-    DrawRectangleRec((Rectangle){ 200, 440, 400 * (g.fovSetting - 60) / 60.0f, 18 }, (Color){220, 60, 45, 255});
-    char fv[32]; snprintf(fv, sizeof fv, "%d", (int)g.fovSetting);
-    T(fv, 620, 438, 22, RAYWHITE, false);
-    if (CheckCollisionPointRec(GetMousePosition(), fBar) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        g.fovSetting = CLAMP((GetMousePosition().x - 200) / 400 * 60.0f + 60, 60, 120);
+    else if (sSetTab == SET_TAB_AUDIO) {
+        snprintf(vt, sizeof vt, "%.0f%%", g.volMaster * 100);
+        if (UiSlider((Rectangle){0}, &g.volMaster, 0, 1, "Master Volume", vt, leftX, rowY)) {
+            SfxSetVolume(g.volMaster, g.volSfx);
+            SfxSetMusicVolume(g.volMusic);
+        }
+        snprintf(vt, sizeof vt, "%.0f%%", g.volMusic * 100);
+        if (UiSlider((Rectangle){0}, &g.volMusic, 0, 1, "Music Volume", vt, leftX, rowY + 64)) {
+            SfxSetVolume(g.volMaster, g.volSfx);
+            SfxSetMusicVolume(g.volMusic);
+        }
+        snprintf(vt, sizeof vt, "%.0f%%", g.volSfx * 100);
+        if (UiSlider((Rectangle){0}, &g.volSfx, 0, 1, "SFX Volume", vt, leftX, rowY + 128)) {
+            SfxSetVolume(g.volMaster, g.volSfx);
+            SfxSetMusicVolume(g.volMusic);
+            SfxPlay(SND_BUY, 1.0f, 0.5f);   // preview blip
+        }
+    }
+    else if (sSetTab == SET_TAB_VIDEO) {
+        snprintf(vt, sizeof vt, "%.0f", g.fovSetting);
+        if (UiSlider((Rectangle){0}, &g.fovSetting, 60, 120, "Field of View", vt, leftX, rowY)) { }
+        snprintf(vt, sizeof vt, "%.2f", g.brightness);
+        if (UiSlider((Rectangle){0}, &g.brightness, 0.5f, 1.5f, "Brightness", vt, leftX, rowY + 64)) { }
+        int fy = rowY + 128;
+        if (UiToggle((Rectangle){ (float)leftX, (float)fy, 340, 44 }, g.fullscreen, "Fullscreen", 20)) {
+            g.fullscreen = !g.fullscreen;
+            ToggleFullscreen();
+        }
+        if (UiToggle((Rectangle){ (float)leftX + 360, (float)fy, 340, 44 }, g.vsync, "VSync", 20)) {
+            g.vsync = !g.vsync;
+            SetTargetFPS(g.vsync ? 60 : 0);
+        }
+        T("Changing VSync takes effect on next launch (window flag).", leftX, fy + 60, 16, (Color){170, 158, 155, 210}, false);
+    }
+    else { // CONTROLS
+        if (sRebindAction >= 0) {
+            // waiting for a key press; ESC cancels
+            const char *w1 = "Press a key for the action...";
+            T(w1, w/2 - MeasureText(w1, 26)/2, 130, 26, (Color){255, 200, 120, 255}, true);
+            const char *w2 = "(ESC cancels, no double bindings allowed)";
+            T(w2, w/2 - MeasureText(w2, 18)/2, 164, 18, (Color){200, 185, 175, 220}, false);
+            int key = GetKeyPressed();
+            if (key != 0) {
+                if (key != KEY_ESCAPE) {
+                    // clear the same key from other actions, then bind
+                    for (int i = 0; i < ACT_COUNT; i++) if (g.keys[i] == key) g.keys[i] = 0;
+                    g.keys[sRebindAction] = key;
+                }
+                sRebindAction = -1;
+            }
+        } else {
+            const char *ch = "Click a key to rebind it";
+            T(ch, w/2 - MeasureText(ch, 18)/2, 128, 18, (Color){170, 158, 155, 210}, false);
+        }
+        // two columns of bindings
+        int rows = (ACT_COUNT + 1) / 2;
+        for (int i = 0; i < ACT_COUNT; i++) {
+            int col = i / rows, row = i % rows;
+            int bx = w/2 - 430 + col * 440;
+            int by = 168 + row * 46;
+            Rectangle r = { (float)bx, (float)by, 400, 38 };
+            bool hot = sRebindAction == i;
+            bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+            DrawRectangleRec(r, hot ? (Color){80, 30, 20, 240} : hover ? (Color){45, 16, 15, 235} : (Color){26, 11, 11, 215});
+            DrawRectangleLinesEx(r, 2, hot ? (Color){255, 180, 90, 255} : (Color){100, 38, 34, 255});
+            T(ActName((KeyAction)i), bx + 14, by + 8, 18, (Color){210, 198, 192, 255}, false);
+            const char *kn = g.keys[i] ? TextFormat("%d", g.keys[i]) : "-";
+            if (g.keys[i]) {
+                // printable name for common keys
+                int k = g.keys[i];
+                if (k >= 32 && k < 127) kn = TextFormat("%c", (char)k);
+                else if (k == KEY_SPACE) kn = "SPACE";
+                else if (k == KEY_LEFT_SHIFT) kn = "L-SHIFT";
+                else if (k == KEY_LEFT_CONTROL) kn = "L-CTRL";
+                else if (k == KEY_LEFT_ALT) kn = "L-ALT";
+                else if (k == KEY_TAB) kn = "TAB";
+                else if (k == KEY_UP) kn = "UP";
+                else if (k == KEY_DOWN) kn = "DOWN";
+                else if (k == KEY_LEFT) kn = "LEFT";
+                else if (k == KEY_RIGHT) kn = "RIGHT";
+                else kn = TextFormat("KEY %d", k);
+            }
+            T(kn, bx + 290, by + 8, 18, hot ? (Color){255, 220, 160, 255} : RAYWHITE, false);
+            if (hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && sRebindAction < 0)
+                sRebindAction = i;
+        }
+        // hard mode shake mode toggle (the Controls-only gameplay option)
+        Rectangle shake = { w/2.0f - 210, 168.0f + rows * 46 + 10, 420, 44 };
+        if (UiToggle(shake, g.shakeByMouse, g.shakeByMouse ? "Shake Torch: MOUSE MOVEMENT" : "Shake Torch: KEY MASH (F)", 19)) {
+            g.shakeByMouse = !g.shakeByMouse;
+        }
+        T("How you shake the flashlight in Hard Mode.", w/2 - MeasureText("How you shake the flashlight in Hard Mode.", 15)/2,
+          (int)(shake.y + shake.height + 6), 15, (Color){150, 140, 140, 200}, false);
     }
 
-    if (UiButton((Rectangle){ w/2.0f - 120, 520, 240, 50 }, "BACK", 24)) g.state = STATE_TITLE;
-    T("ESC to go back", 20, h - 30, 18, (Color){160, 150, 150, 200}, false);
+    if (UiButton((Rectangle){ w/2.0f - 120, (float)h - 90, 240, 50 }, "BACK", 24)) {
+        g.state = STATE_TITLE;
+        SaveSettings();
+    }
+    if (sSliderFlash > 0) sSliderFlash -= (float)g.dt;
+    T("ESC to go back (settings save automatically)", 20, h - 30, 18, (Color){160, 150, 150, 200}, false);
+    // version string in settings header (dev builds)
+    char ver[64];
+    snprintf(ver, sizeof ver, "v" GAME_VERSION);
+    T(ver, w - 100, 40, 16, (Color){150, 140, 140, 200}, false);
 }
 
 void HudDrawPause(void) {

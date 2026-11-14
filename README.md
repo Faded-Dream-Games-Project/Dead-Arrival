@@ -5,6 +5,9 @@ COD-zombies-style difficulty curve: zombies get slowly tougher each round, you e
 for every hit and kill, buy weapons off walls, gamble on the Mystery Box, drink perk sodas,
 and open doors to expand the map — until you go down.
 
+> **Dev build** — this branch (`dev`) is the active development version (`v dev`).
+> The first numbered release will be 0.1.0 on `main`.
+
 ![Dead Arrival](textures/logo.png)
 
 ## Features
@@ -29,6 +32,12 @@ and open doors to expand the map — until you go down.
   3. **Graveyard Hollow** — zombies claw out of their graves; a church sits in the middle.
   4. **Die Arise** — sky-high rooftops with jump pads, a zipline, a loot pit and a spire.
 - **Doors to unlock** with points, wall buys, perk machines, Mystery Box on every map.
+- **Hard Mode** (toggle in map select): much darker — your only light is a shaky
+  flashlight that dims until you shake it again (mouse movement or key mash;
+  configurable in Settings > Controls).
+- **Settings menu** with mouse sensitivity (wide range, no smoothing), master /
+  music / SFX volume, brightness, FOV, invert Y, fullscreen, VSync and full
+  key rebinding. Saved to `settings.cfg` and restored on startup.
 - **Custom maps & multiplayer**: shown in the menu as *Coming Soon* — the map data is
   already data-driven in code, designed to be externalized later.
 
@@ -48,6 +57,8 @@ and open doors to expand the map — until you go down.
 | Ctrl / C | Crouch |
 | Space | Jump |
 | F11 | Fullscreen |
+
+All keys are rebindable in **Settings > Controls** (defaults shown).
 | Esc | Pause / back |
 
 ## Build

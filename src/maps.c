@@ -194,6 +194,8 @@ static void BuildTheater(MapDef *m) {
     m->sunDir = Vec3Norm(Vec3(-0.35f, -0.8f, 0.45f));
     m->sunColor = (Color){ 190, 170, 200 };
     m->ambient = (Color){ 130, 118, 145 };
+    m->fillDir = Vec3Norm(Vec3(0.35f, -0.6f, -0.45f));
+    m->fillColor = (Color){ 105, 95, 125 };
     m->playerStart = Vec3(0, 0, 17.5f);
     m->playerYaw = 180.0f;
     m->boxPos = Vec3(0, 1.2f, -14.5f);
@@ -322,6 +324,8 @@ static void BuildBunker(MapDef *m) {
     m->sunDir = Vec3Norm(Vec3(0.5f, -0.7f, -0.3f));
     m->sunColor = (Color){ 235, 205, 155 };
     m->ambient = (Color){ 140, 128, 105 };
+    m->fillDir = Vec3Norm(Vec3(-0.5f, -0.5f, 0.3f));
+    m->fillColor = (Color){ 120, 105, 85 };
     m->playerStart = Vec3(0, 0, 7);
     m->playerYaw = 180.0f;
     m->boxPos = Vec3(-27, 0, 4);
@@ -444,10 +448,10 @@ static void BuildBunker(MapDef *m) {
 
     SpawnAdd(m, -30.5f, -0.5f, -1, false, 0);
     SpawnAdd(m, -30.5f, 6.5f, -1, false, 0);
-    SpawnAdd(m, 0, -26.8f, 1, false, 0);
-    SpawnAdd(m, 6, -26.8f, 1, false, 0);
-    SpawnAdd(m, 30.5f, -9.0f, 2, false, 0);
-    SpawnAdd(m, 30.5f, 1.0f, 2, false, 0);
+    SpawnAdd(m, 0, -25.4f, 1, false, 0);
+    SpawnAdd(m, 6, -25.4f, 1, false, 0);
+    SpawnAdd(m, 29.4f, -9.0f, 2, false, 0);
+    SpawnAdd(m, 29.4f, 1.0f, 2, false, 0);
     SpawnAdd(m, 0, 26.5f, -1, false, 0);
     SpawnAdd(m, -3.5f, 26.5f, -1, false, 0);
     SpawnAdd(m, 3.5f, 26.5f, -1, false, 0);
@@ -468,7 +472,9 @@ static void BuildGraveyard(MapDef *m) {
     m->fogDensity = 0.030f;
     m->sunDir = Vec3Norm(Vec3(0.2f, -0.85f, -0.4f));
     m->sunColor = (Color){ 70, 85, 120 };
-    m->ambient = (Color){ 40, 46, 62 };
+    m->ambient = (Color){ 55, 62, 82 };
+    m->fillDir = Vec3Norm(Vec3(-0.2f, -0.5f, 0.4f));
+    m->fillColor = (Color){ 70, 82, 110 };
     m->playerStart = Vec3(0, 0, 26);
     m->playerYaw = 0.0f;
     m->boxPos = Vec3(0, 0.1f, -8.5f);   // inside the church, before the altar
@@ -579,8 +585,8 @@ static void BuildGraveyard(MapDef *m) {
     SpawnAdd(m, 0, -33.0f, -1, false, 0);
     SpawnAdd(m, -36.0f, -33.0f, -1, false, 0);
     SpawnAdd(m, 36.0f, -33.0f, -1, false, 0);
-    SpawnAdd(m, 25.0f, -21.0f, 0, false, 0);
-    SpawnAdd(m, -26.0f, 27.0f, 1, false, 0);
+    SpawnAdd(m, 24.0f, -18.5f, 0, false, 0);
+    SpawnAdd(m, -26.0f, 22.0f, 1, false, 0);
     SpawnAdd(m, 0, -11.0f, -1, false, 0);
 }
 
@@ -597,7 +603,9 @@ static void BuildDieArise(MapDef *m) {
     m->fogDensity = 0.008f;
     m->sunDir = Vec3Norm(Vec3(-0.4f, -0.75f, 0.3f));
     m->sunColor = (Color){ 200, 150, 130 };
-    m->ambient = (Color){ 80, 70, 90 };
+    m->ambient = (Color){ 98, 88, 108 };
+    m->fillDir = Vec3Norm(Vec3(0.4f, -0.55f, -0.3f));
+    m->fillColor = (Color){ 110, 98, 130 };
     m->playerStart = Vec3(0, 0, 2);
     m->playerYaw = 90.0f;
     m->boxPos = Vec3(-26, 0.1f, 10);
@@ -1054,6 +1062,14 @@ bool MapValidate(MapId id, char *err, int errSize) {
     for (int i = 0; i < m->spawnCount; i++) {
         float sy = GroundHeightAt(m->spawns[i].pos.x, m->spawns[i].pos.z, m->spawns[i].pos.y + 6.0f);
         if (sy < -50) FAIL("spawn %d floats", i);
+        // spawn must sit on a walkable nav surface (inside map bounds,
+        // headroom present) in at least one direction
+        Vector3 a = Vec3(m->spawns[i].pos.x, sy, m->spawns[i].pos.z);
+        bool walk = NavWalkableLine(a, Vec3(a.x + 0.9f, sy, a.z)) ||
+                    NavWalkableLine(a, Vec3(a.x - 0.9f, sy, a.z)) ||
+                    NavWalkableLine(a, Vec3(a.x, sy, a.z + 0.9f)) ||
+                    NavWalkableLine(a, Vec3(a.x, sy, a.z - 0.9f));
+        if (!walk) FAIL("spawn %d not on walkable ground", i);
     }
     for (int i = 0; i < m->wallbuyCount; i++)
         if (m->wallbuys[i].widx < 0 || m->wallbuys[i].widx >= GUN_COUNT_TOTAL) FAIL("wallbuy %d bad weapon", i);

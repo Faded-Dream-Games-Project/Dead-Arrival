@@ -190,10 +190,10 @@ void WeaponsUpdate(void) {
     if (p->downed) return;
 
     // switching: 1/2/3, Q swap, mouse wheel
-    if (IsKeyPressed(KEY_ONE))   { if (p->weapons[0].widx >= 0) { p->curSlot = 0; p->raiseTimer = 0.3f; p->reloadTimer = 0; } }
-    if (IsKeyPressed(KEY_TWO))   { if (p->weapons[1].widx >= 0) { p->curSlot = 1; p->raiseTimer = 0.3f; p->reloadTimer = 0; } }
-    if (IsKeyPressed(KEY_THREE) || IsKeyPressed(KEY_V)) { p->curSlot = SLOT_KNIFE; p->raiseTimer = 0.25f; p->reloadTimer = 0; }
-    if (IsKeyPressed(KEY_Q)) {
+    if (ActPressed(ACT_WEP1))   { if (p->weapons[0].widx >= 0) { p->curSlot = 0; p->raiseTimer = 0.3f; p->reloadTimer = 0; } }
+    if (ActPressed(ACT_WEP2))   { if (p->weapons[1].widx >= 0) { p->curSlot = 1; p->raiseTimer = 0.3f; p->reloadTimer = 0; } }
+    if (ActPressed(ACT_WEP3) || IsKeyPressed(KEY_V)) { p->curSlot = SLOT_KNIFE; p->raiseTimer = 0.25f; p->reloadTimer = 0; }
+    if (ActPressed(ACT_SWAP)) {
         int other = p->curSlot == 0 ? 1 : 0;
         if (p->weapons[other].widx >= 0) { p->curSlot = other; p->raiseTimer = 0.3f; p->reloadTimer = 0; }
     }
@@ -243,7 +243,7 @@ void WeaponsUpdate(void) {
 
     // fire input
     if (w->mode == FIRE_MELEE) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_F)) KnifeAttack();
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || ActPressed(ACT_KNIFE)) KnifeAttack();
         return;
     }
     if (p->reloadTimer > 0) {
@@ -289,7 +289,7 @@ void WeaponsUpdate(void) {
         else SfxPlay(SND_DRY, 1.0f, 0.6f);
     }
     // manual reload (R)
-    if (IsKeyPressed(KEY_R)) StartReload();
+    if (ActPressed(ACT_RELOAD)) StartReload();
 }
 
 // ---------------------------------------------------------------------------

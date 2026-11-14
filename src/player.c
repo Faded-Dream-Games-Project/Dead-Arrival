@@ -219,11 +219,13 @@ void PlayerUpdate(void) {
     if (p->downed) { PlayerDownedUpdate(); return; }
 
     // ---- mouse look ----
+    // sens 0.2..10 (slider is exponential); no acceleration, no smoothing,
+    // no clamping beyond pitch limits: mouse in -> rotation out, same frame.
     Vector2 md = GetMouseDelta();
     float sens = g.sens * 0.0022f;
     if (p->adsBlend > 0.5f) sens *= 0.6f;
     p->yaw   -= md.x * sens;
-    p->pitch -= md.y * sens;
+    p->pitch -= md.y * sens * (g.invertY ? -1.0f : 1.0f);
     p->pitch = CLAMP(p->pitch, -89.0f, 89.0f);
     if (p->yaw > 180.0f) p->yaw -= 360.0f;
     if (p->yaw < -180.0f) p->yaw += 360.0f;
@@ -233,15 +235,15 @@ void PlayerUpdate(void) {
     Vector3 fwd   = Vec3(-sinf(yawR), 0, -cosf(yawR));
     Vector3 right = Vec3( cosf(yawR), 0, -sinf(yawR));
     Vector3 wish = Vec3(0,0,0);
-    if (IsKeyDown(KEY_W)) wish = Vec3Add(wish, fwd);
-    if (IsKeyDown(KEY_S)) wish = Vec3Sub(wish, fwd);
-    if (IsKeyDown(KEY_D)) wish = Vec3Add(wish, right);
-    if (IsKeyDown(KEY_A)) wish = Vec3Sub(wish, right);
+    if (ActDown(ACT_FWD))    wish = Vec3Add(wish, fwd);
+    if (ActDown(ACT_BACK))   wish = Vec3Sub(wish, fwd);
+    if (ActDown(ACT_RIGHT))  wish = Vec3Add(wish, right);
+    if (ActDown(ACT_LEFT))   wish = Vec3Sub(wish, right);
     bool moving = Vec3Len(wish) > 0.01f;
     if (moving) wish = Vec3Norm(wish);
 
-    bool sprinting = IsKeyDown(KEY_LEFT_SHIFT) && moving && p->adsBlend < 0.3f;
-    bool crouched = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C);
+    bool sprinting = ActDown(ACT_SPRINT) && moving && p->adsBlend < 0.3f;
+    bool crouched = ActDown(ACT_CROUCH) || IsKeyDown(KEY_C);
     float speed = crouched ? PLAYER_CRAWL : (sprinting ? PLAYER_SPRINT : PLAYER_WALK);
     // downed-not-possible here; reload slows slightly
     if (p->reloadTimer > 0) speed *= 0.85f;
@@ -257,7 +259,7 @@ void PlayerUpdate(void) {
     p->sprintTime = sprinting ? 1.0f : 0.0f;
 
     // jump
-    if (IsKeyPressed(KEY_SPACE) && p->grounded) {
+    if (ActPressed(ACT_JUMP) && p->grounded) {
         p->vel.y = PLAYER_JUMP;
         p->grounded = false;
     }
@@ -325,7 +327,7 @@ void PlayerUpdate(void) {
     // ---- interaction (E) ----
     char label[96];
     static bool eHeld = false;
-    bool eNow = IsKeyDown(KEY_E);
+    bool eNow = ActDown(ACT_USE);
     g.ePressedThisFrame = eNow && !eHeld;
     eHeld = eNow;
     if (eNow) ScanInteract(label, sizeof label, NULL, g.ePressedThisFrame);
@@ -343,10 +345,10 @@ void PlayerDownedUpdate(void) {
     Vector3 fwd = Vec3(-sinf(yawR), 0, -cosf(yawR));
     Vector3 right = Vec3(cosf(yawR), 0, -sinf(yawR));
     Vector3 wish = Vec3(0,0,0);
-    if (IsKeyDown(KEY_W)) wish = Vec3Add(wish, fwd);
-    if (IsKeyDown(KEY_S)) wish = Vec3Sub(wish, fwd);
-    if (IsKeyDown(KEY_D)) wish = Vec3Add(wish, right);
-    if (IsKeyDown(KEY_A)) wish = Vec3Sub(wish, right);
+    if (ActDown(ACT_FWD))   wish = Vec3Add(wish, fwd);
+    if (ActDown(ACT_BACK))  wish = Vec3Sub(wish, fwd);
+    if (ActDown(ACT_RIGHT)) wish = Vec3Add(wish, right);
+    if (ActDown(ACT_LEFT))  wish = Vec3Sub(wish, right);
     if (Vec3Len(wish) > 0.01f) {
         wish = Vec3Norm(wish);
         p->vel.x = wish.x * PLAYER_CRAWL;

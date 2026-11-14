@@ -39,12 +39,24 @@ static bool SpawnActive(SpawnPoint *s) {
     return g.map.doorOpen[s->doorId];
 }
 
+// A spawn is usable if it has ground and a walkable nav cell (inside map,
+// headroom, not on a wall top). Checked per map in selftest too.
+static bool SpawnUsable(SpawnPoint *s) {
+    float gy = GroundHeightAt(s->pos.x, s->pos.z, s->pos.y + 6.0f);
+    if (gy < -50) return false;
+    Vector3 a = Vec3(s->pos.x, gy, s->pos.z);
+    return NavWalkableLine(a, Vec3(a.x + 0.9f, gy, a.z)) ||
+           NavWalkableLine(a, Vec3(a.x - 0.9f, gy, a.z)) ||
+           NavWalkableLine(a, Vec3(a.x, gy, a.z + 0.9f)) ||
+           NavWalkableLine(a, Vec3(a.x, gy, a.z - 0.9f));
+}
+
 static void SpawnZombie(void) {
-    // pick a random active spawn whose grave/window isn't crowded
+    // pick a random active, usable spawn whose grave/window isn't crowded
     int candidates[MAX_SPAWNS];
     int n = 0;
     for (int i = 0; i < g.map.spawnCount; i++)
-        if (SpawnActive(&g.map.spawns[i])) candidates[n++] = i;
+        if (SpawnActive(&g.map.spawns[i]) && SpawnUsable(&g.map.spawns[i])) candidates[n++] = i;
     if (n == 0) return;
     int tries = 6;
     int pick = -1;
