@@ -341,16 +341,13 @@ void WeaponDrawViewmodel(Camera3D cam) {
     if (g.muzzleFlash > 0) GfxSetFlash(muzzleWorld, g.muzzleFlash * 14.0f);
     (void)cam;
 
-    // helper: draw gun part in gun-space (x right, y up, z forward) -> world
+    // helper: draw gun part in gun-space (x right, y up, z forward) -> world.
+    // Sizes go through the camera basis, never the world axes, so the gun
+    // keeps its exact shape at any yaw/pitch.
     #define GUN_PART(cx, cy, cz, sx, sy, sz, tint) do { \
         Vector3 _lp = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz + (cz))), \
             Vec3Scale(right, px + (cx))), Vec3Scale(up, py + (cy))); \
-        Vector3 _size = Vec3Add(Vec3Add(Vec3Scale(fwd, (sz)), Vec3Scale(right, (sx))), Vec3Scale(up, (sy))); \
-        /* axis-aligned approx: build from 3 scale comps on axes */ \
-        Vector3 _axisSize = Vec3(fabsf(_size.x)+fabsf(_size.y)*0+fabsf(_size.z)*0, \
-                                 fabsf(_size.y)+fabsf(_size.x)*0+fabsf(_size.z)*0, \
-                                 fabsf(_size.z)+fabsf(_size.x)*0+fabsf(_size.y)*0); \
-        GfxDrawCubePart(_lp, _axisSize, Vec3(0,0,0), tint, AssetsTex(TEX_METAL)); \
+        GfxDrawCubeBasis(_lp, right, up, fwd, (sx), (sy), (sz), tint, AssetsTex(TEX_METAL)); \
     } while (0)
 
     Color gunmetal = (Color){ 52, 54, 58, 255 };
@@ -363,13 +360,11 @@ void WeaponDrawViewmodel(Camera3D cam) {
         Vector3 lp = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz+0.18f - swing*0.1f)),
             Vec3Scale(right, px + 0.04f - swing*0.12f)), Vec3Scale(up, py + 0.02f + swing*0.10f));
         // handle
-        Vector3 hSize = Vec3Add(Vec3Add(Vec3Scale(right, 0.030f), Vec3Scale(up, 0.030f)), Vec3Scale(fwd, 0.11f));
-        GfxDrawCubePart(lp, Vec3(fabsf(hSize.x), fabsf(hSize.y), fabsf(hSize.z)), Vec3(0,0,0), dark, AssetsTex(TEX_METAL));
+        GfxDrawCubeBasis(lp, right, up, fwd, 0.030f, 0.030f, 0.11f, dark, AssetsTex(TEX_METAL));
         // blade
         Vector3 bp = Vec3Add(lp, Vec3Scale(fwd, 0.13f));
-        Vector3 bSize = Vec3Add(Vec3Add(Vec3Scale(right, 0.012f), Vec3Scale(up, 0.045f)), Vec3Scale(fwd, kn));
-        GfxDrawCubePart(bp, Vec3(fabsf(bSize.x), fabsf(bSize.y), fabsf(bSize.z)), Vec3(0,0,0),
-                        (Color){200, 202, 208, 255}, AssetsTex(TEX_METAL));
+        GfxDrawCubeBasis(bp, right, up, fwd, 0.012f, 0.045f, kn,
+                         (Color){200, 202, 208, 255}, AssetsTex(TEX_METAL));
         return;
     }
 

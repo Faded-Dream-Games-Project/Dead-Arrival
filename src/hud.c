@@ -424,16 +424,16 @@ void HudDrawSettings(void) {
     char vt[48];
 
     if (sSetTab == SET_TAB_GAME) {
-        // sensitivity: exponential slider 0.2 .. 10 so the middle (~1.4) is
-        // a natural aiming speed and the top end is 5x the old max
-        float t = logf(g.sens / 0.2f) / logf(50.0f);   // 0..1
+        // sensitivity: exponential slider 0.2 .. 20 so the middle (~2) is a
+        // natural aiming speed and the top end is twice the previous max
+        float t = logf(g.sens / 0.2f) / logf(100.0f);   // 0..1
         snprintf(vt, sizeof vt, "%.2f", g.sens);
         Rectangle sb = { 0,0,0,0 };
         float tt = t;
         if (UiSlider(sb, &tt, 0.0f, 1.0f, "Mouse Sensitivity", vt, leftX, rowY)) {
-            g.sens = 0.2f * powf(50.0f, CLAMP(tt, 0, 1));
+            g.sens = 0.2f * powf(100.0f, CLAMP(tt, 0, 1));
         }
-        T("low - high (max is 5x the old limit)", leftX + 240, rowY + 26, 14, (Color){150, 140, 140, 200}, false);
+        T("low - high (default 1.0 turns 180 deg in one short swipe)", leftX + 240, rowY + 26, 14, (Color){150, 140, 140, 200}, false);
         int fy = rowY + 70;
         if (UiToggle((Rectangle){ (float)leftX, (float)fy, 340, 44 }, g.invertY, "Invert Y Axis", 20)) {
             g.invertY = !g.invertY;

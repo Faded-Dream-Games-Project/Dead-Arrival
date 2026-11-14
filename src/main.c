@@ -81,7 +81,7 @@ void LoadSettings(void) {
         }
     }
     fclose(f);
-    g.sens = CLAMP(g.sens, 0.2f, 10.0f);
+    g.sens = CLAMP(g.sens, 0.2f, 20.0f);
     g.volMaster = CLAMP(g.volMaster, 0, 1);
     g.volMusic = CLAMP(g.volMusic, 0, 1);
     g.volSfx = CLAMP(g.volSfx, 0, 1);
@@ -304,7 +304,7 @@ static int RunSelftest(void) {
         Game check = g;   // save current
         g.volMaster = -1; g.sens = 99;   // out-of-range values
         LoadSettings();
-        bool ok = g.sens >= 0.2f && g.sens <= 10.0f && g.volMaster >= 0 && g.volMaster <= 1;
+        bool ok = g.sens >= 0.2f && g.sens <= 20.0f && g.volMaster >= 0 && g.volMaster <= 1;
         printf("settings clamp: %s\n", ok ? "OK" : "FAIL");
         if (!ok) fails++;
         g = check;   // restore

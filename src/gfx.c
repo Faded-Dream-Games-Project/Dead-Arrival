@@ -317,6 +317,24 @@ void GfxDrawCubePart(Vector3 pos, Vector3 size, Vector3 rotDeg, Color tint, Text
     DrawMesh(sCubeMesh, sScratchMat, m);
 }
 
+// Cube in an arbitrary orthonormal basis (camera-space parts: viewmodels).
+// right/up/fwd must be unit and mutually perpendicular; sx/sy/sz size the box
+// along those axes. Builds T*R*S exactly, so the shape never shears or bloats
+// no matter where the camera points.
+void GfxDrawCubeBasis(Vector3 pos, Vector3 right, Vector3 up, Vector3 fwd,
+                      float sx, float sy, float sz, Color tint, Texture2D tex) {
+    sScratchMat.shader = sWorldShader;
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].texture = tex.id ? tex : AssetsTex(TEX_METAL);
+    sScratchMat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
+    GfxSetTint(tint);
+    // rotation columns = basis axes; scale rides along the same columns
+    Matrix m = MatrixIdentity();
+    m.m0 = right.x*sx; m.m4 = up.x*sy; m.m8  = fwd.x*sz; m.m12 = pos.x;
+    m.m1 = right.y*sx; m.m5 = up.y*sy; m.m9  = fwd.y*sz; m.m13 = pos.y;
+    m.m2 = right.z*sx; m.m6 = up.z*sy; m.m10 = fwd.z*sz; m.m14 = pos.z;
+    DrawMesh(sCubeMesh, sScratchMat, m);
+}
+
 // Screen-space sky: vertical gradient with horizon placed from camera pitch.
 void GfxDrawSky(Camera3D cam, float playerPitchDeg) {
     int w = GetScreenWidth(), h = GetScreenHeight();
