@@ -4,6 +4,7 @@
 #include "game.h"
 
 static int  s_focus = 0;             // keyboard focus index for the current menu
+static int  s_settings_from = 0;     // state to return to when leaving settings
 static float s_splash_t = 0;
 
 // point popups ("+50")
@@ -64,12 +65,63 @@ static void menu_nav(int total)
 }
 
 // ---------------------------------------------------------------------------
+// Settings helpers (rows: 0 sens, 1 fov, 2 master vol, 3 sfx vol,
+// 4 invert Y, 5 show fps, 6 fullscreen, 7 back)
+// ---------------------------------------------------------------------------
+enum { SET_ROW_SENS = 0, SET_ROW_FOV, SET_ROW_MASTER, SET_ROW_SFX,
+       SET_ROW_INVERT, SET_ROW_FPS, SET_ROW_FULLSCREEN, SET_ROW_BACK, SET_ROWS };
+
+static void settings_apply_fullscreen(void)
+{
+    if (!IsWindowReady()) return;
+    if (g_settings.fullscreen != IsWindowFullscreen()) ToggleFullscreen();
+}
+
+static void settings_adjust(int row, int dir)
+{
+    switch (row)
+    {
+        case SET_ROW_SENS:
+            g_settings.sensitivity = clampf(g_settings.sensitivity + 0.1f * dir, 0.3f, 4.0f);
+            break;
+        case SET_ROW_FOV:
+            g_settings.fov = clampf(g_settings.fov + 5.0f * dir, 60.0f, 110.0f);
+            break;
+        case SET_ROW_MASTER:
+            g_settings.volume_master = clampf(g_settings.volume_master + 0.05f * dir, 0.0f, 1.0f);
+            SetMasterVolume(g_settings.volume_master);
+            break;
+        case SET_ROW_SFX:
+            g_settings.volume_sfx = clampf(g_settings.volume_sfx + 0.05f * dir, 0.0f, 1.0f);
+            break;
+        case SET_ROW_INVERT:     if (dir != 0) g_settings.invert_y = !g_settings.invert_y; break;
+        case SET_ROW_FPS:        if (dir != 0) g_settings.show_fps = !g_settings.show_fps; break;
+        case SET_ROW_FULLSCREEN:
+            if (dir != 0)
+            {
+                g_settings.fullscreen = !g_settings.fullscreen;
+                settings_apply_fullscreen();
+            }
+            break;
+        default: break;
+    }
+}
+
+static void settings_leave(void)
+{
+    settings_save(&g_settings);
+    // return to wherever settings was opened from (main menu or pause menu)
+    g.state = (s_settings_from == GS_PAUSED) ? GS_PAUSED : GS_MENU;
+    s_focus = 0;
+}
+
+// ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
 void ui_update(void)
 {
-    // menu music lifecycle
-    bool in_menu = (g.state != GS_PLAYING && g.state != GS_DEAD);
+    // menu music lifecycle (not while playing, dead or paused)
+    bool in_menu = (g.state != GS_PLAYING && g.state != GS_DEAD && g.state != GS_PAUSED);
     assets_menu_music(in_menu);
     if (in_menu) assets_menu_music_update();
 
@@ -95,7 +147,7 @@ void ui_update(void)
                 {
                     case 0: g.state = GS_MAPSELECT; s_focus = 0; break;
                     case 1: /* multiplayer: coming soon */ break;
-                    case 2: g.state = GS_SETTINGS; s_focus = 0; break;
+                    case 2: g.state = GS_SETTINGS; s_settings_from = GS_MENU; s_focus = 0; break;
                     case 3: g.state = GS_EXTRAS; break;
                     case 4: g.want_quit = true; break;
                 }
@@ -119,43 +171,11 @@ void ui_update(void)
 
         case GS_SETTINGS:
         {
-            menu_nav(8);
-            float step = (s_focus == 0) ? 0.1f : 1.0f;
-            if (IsKeyPressed(KEY_LEFT))
-            {
-                switch (s_focus)
-                {
-                    case 0: g_settings.sensitivity = clampf(g_settings.sensitivity - 0.1f, 0.3f, 4.0f); break;
-                    case 1: g_settings.fov -= 5; break;
-                    case 2: g_settings.volume_master = clampf(g_settings.volume_master - 0.05f, 0, 1); break;
-                    case 3: g_settings.volume_sfx = clampf(g_settings.volume_sfx - 0.05f, 0, 1); break;
-                    case 4: g_settings.invert_y = !g_settings.invert_y; break;
-                    case 5: g_settings.show_fps = !g_settings.show_fps; break;
-                    case 6: g_settings.fullscreen = !g_settings.fullscreen; break;
-                }
-                (void)step;
-            }
-            if (IsKeyPressed(KEY_RIGHT))
-            {
-                switch (s_focus)
-                {
-                    case 0: g_settings.sensitivity = clampf(g_settings.sensitivity + 0.1f, 0.3f, 4.0f); break;
-                    case 1: g_settings.fov += 5; break;
-                    case 2: g_settings.volume_master = clampf(g_settings.volume_master + 0.05f, 0, 1); break;
-                    case 3: g_settings.volume_sfx = clampf(g_settings.volume_sfx + 0.05f, 0, 1); break;
-                    case 4: g_settings.invert_y = !g_settings.invert_y; break;
-                    case 5: g_settings.show_fps = !g_settings.show_fps; break;
-                    case 6: g_settings.fullscreen = !g_settings.fullscreen; break;
-                }
-            }
-            // apply audio immediately
-            SetMasterVolume(g_settings.volume_master);
-            if (IsKeyPressed(KEY_ESCAPE) || (ui_key_enter() && s_focus == 7))
-            {
-                g_settings.fov = clampf((float)g_settings.fov, 60, 110);
-                settings_save(&g_settings);
-                g.state = GS_MENU;
-            }
+            menu_nav(SET_ROWS);
+            if (IsKeyPressed(KEY_LEFT))  settings_adjust(s_focus, -1);
+            if (IsKeyPressed(KEY_RIGHT)) settings_adjust(s_focus, +1);
+            if (IsKeyPressed(KEY_ESCAPE) || (ui_key_enter() && s_focus == SET_ROW_BACK))
+                settings_leave();
         } break;
 
         case GS_EXTRAS:
@@ -165,22 +185,25 @@ void ui_update(void)
 
         case GS_PLAYING:
         {
+            // gameplay input lives in player.c; ESC opens the pause menu
             if (IsKeyPressed(KEY_ESCAPE))
             {
                 g.state = GS_PAUSED;
+                s_focus = 0;
                 EnableCursor();
             }
         } break;
 
         case GS_PAUSED:
         {
-            menu_nav(3);
+            menu_nav(4);
             if (IsKeyPressed(KEY_ESCAPE)) { g.state = GS_PLAYING; DisableCursor(); }
             if (ui_key_enter())
             {
                 if (s_focus == 0) { g.state = GS_PLAYING; DisableCursor(); }
-                else if (s_focus == 1) { g.state = GS_SETTINGS; s_focus = 0; }
-                else game_end_to_menu();
+                else if (s_focus == 1) { g.state = GS_SETTINGS; s_settings_from = GS_PAUSED; s_focus = 0; }
+                else if (s_focus == 2) game_end_to_menu();
+                else g.want_quit = true;
             }
         } break;
 
@@ -257,7 +280,7 @@ void ui_draw(void)
                 }
                 r.y += 56;
             }
-            snprintf(buf, sizeof(buf), "v%s  -  %d maps installed  -  best round: %d",
+            snprintf(buf, sizeof(buf), "%s build  -  %d maps installed  -  best round: %d",
                      APP_VERSION, g.map_count, g.best_round);
             draw_centered_text(buf, H - 34, 16, (Color){ 110, 110, 116, 255 });
         } break;
@@ -277,9 +300,12 @@ void ui_draw(void)
             else
             {
                 Rectangle r = { W / 2.0f - 240, 100, 480, 64 };
+                Vector2 m = GetMousePosition();
                 for (int i = 0; i < g.map_count; i++)
                 {
                     MapEntry *e = &g.map_entries[i];
+                    // mouse hover selects the card
+                    if (CheckCollisionPointRec(m, r)) s_focus = i;
                     bool hover = (s_focus == i);
                     DrawRectangleRec(r, hover ? (Color){ 56, 20, 20, 235 } : (Color){ 30, 30, 36, 220 });
                     DrawRectangleLinesEx(r, 2, hover ? (Color){ 255, 90, 70, 255 }
@@ -287,6 +313,9 @@ void ui_draw(void)
                     DrawText(e->name, (int)r.x + 14, (int)r.y + 8, 22, RAYWHITE);
                     DrawText(e->desc[0] ? e->desc : "no description", (int)r.x + 14, (int)r.y + 36, 15,
                              (Color){ 160, 160, 166, 255 });
+                    // click to start
+                    if (hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+                        game_start_map(e->file);
                     r.y += 74;
                 }
             }
@@ -301,24 +330,40 @@ void ui_draw(void)
             draw_menu_background();
             draw_centered_text("SETTINGS", 46, 36, RAYWHITE);
 
-            const char *rows[8];
-            rows[0] = TextFormat("Mouse sensitivity   < %.2f >", g_settings.sensitivity);
-            rows[1] = TextFormat("Field of view       < %d >", (int)g_settings.fov);
-            rows[2] = TextFormat("Master volume       < %d%% >", (int)(g_settings.volume_master * 100));
-            rows[3] = TextFormat("SFX volume          < %d%% >", (int)(g_settings.volume_sfx * 100));
-            rows[4] = TextFormat("Invert mouse Y      < %s >", g_settings.invert_y ? "ON" : "OFF");
-            rows[5] = TextFormat("Show FPS            < %s >", g_settings.show_fps ? "ON" : "OFF");
-            rows[6] = TextFormat("Fullscreen          < %s >", g_settings.fullscreen ? "ON" : "OFF");
-            rows[7] = "BACK  (settings save automatically)";
+            char rows[SET_ROWS][64];
+            snprintf(rows[SET_ROW_SENS], 64, "Mouse sensitivity   < %.2f >", g_settings.sensitivity);
+            snprintf(rows[SET_ROW_FOV], 64, "Field of view       < %d >", (int)g_settings.fov);
+            snprintf(rows[SET_ROW_MASTER], 64, "Master volume       < %d%% >", (int)(g_settings.volume_master * 100));
+            snprintf(rows[SET_ROW_SFX], 64, "SFX volume          < %d%% >", (int)(g_settings.volume_sfx * 100));
+            snprintf(rows[SET_ROW_INVERT], 64, "Invert mouse Y      < %s >", g_settings.invert_y ? "ON" : "OFF");
+            snprintf(rows[SET_ROW_FPS], 64, "Show FPS            < %s >", g_settings.show_fps ? "ON" : "OFF");
+            snprintf(rows[SET_ROW_FULLSCREEN], 64, "Fullscreen          < %s >", g_settings.fullscreen ? "ON" : "OFF");
+            snprintf(rows[SET_ROW_BACK], 64, "BACK  (settings save automatically)");
 
+            Vector2 m = GetMousePosition();
             int y = 130;
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < SET_ROWS; i++)
             {
-                Color c = (s_focus == i) ? (Color){ 255, 120, 90, 255 } : (Color){ 190, 190, 196, 255 };
+                Rectangle row = { W / 2.0f - 300, (float)y - 6, 600, 34 };
+                // mouse: hover selects, click adjusts (left half = -, right = +)
+                if (CheckCollisionPointRec(m, row))
+                {
+                    s_focus = i;
+                    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+                    {
+                        if (i == SET_ROW_BACK) { settings_leave(); return; }
+                        bool left = (m.x < row.x + row.width * 0.5f);
+                        settings_adjust(i, left ? -1 : +1);
+                    }
+                }
+                bool hi = (s_focus == i);
+                if (hi) DrawRectangleRec(row, (Color){ 40, 16, 16, 200 });
+                Color c = hi ? (Color){ 255, 120, 90, 255 } : (Color){ 190, 190, 196, 255 };
                 draw_centered_text(rows[i], y, 22, c);
                 y += 42;
             }
-            draw_centered_text("LEFT/RIGHT adjust - ESC back", H - 60, 16, (Color){ 120, 120, 126, 255 });
+            draw_centered_text("LEFT/RIGHT or CLICK to adjust - ESC to go back", H - 60, 16,
+                               (Color){ 120, 120, 126, 255 });
         } break;
 
         case GS_EXTRAS:
@@ -348,17 +393,18 @@ void ui_draw(void)
         case GS_PAUSED:
         {
             DrawRectangle(0, 0, W, H, (Color){ 0, 0, 0, 160 });
-            draw_centered_text("PAUSED", H / 2 - 150, 44, RAYWHITE);
+            draw_centered_text("PAUSED", H / 2 - 170, 44, RAYWHITE);
 
-            Rectangle r = { W / 2.0f - 140, H / 2 - 60.0f, 280, 46 };
-            const char *items[3] = { "RESUME", "SETTINGS", "QUIT TO MENU" };
-            for (int i = 0; i < 3; i++)
+            Rectangle r = { W / 2.0f - 140, H / 2 - 70.0f, 280, 46 };
+            const char *items[4] = { "RESUME", "SETTINGS", "QUIT TO MENU", "EXIT GAME" };
+            for (int i = 0; i < 4; i++)
             {
-                if (ui_button(items[i], r, true, i, 3))
+                if (ui_button(items[i], r, true, i, 4))
                 {
                     if (i == 0) { g.state = GS_PLAYING; DisableCursor(); }
-                    else if (i == 1) { g.state = GS_SETTINGS; s_focus = 0; }
-                    else game_end_to_menu();
+                    else if (i == 1) { g.state = GS_SETTINGS; s_settings_from = GS_PAUSED; s_focus = 0; }
+                    else if (i == 2) game_end_to_menu();
+                    else g.want_quit = true;
                 }
                 r.y += 56;
             }

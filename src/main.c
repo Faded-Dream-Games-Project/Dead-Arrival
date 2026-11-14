@@ -103,9 +103,13 @@ static bool game_boot(bool hidden)
     if (hidden) SetConfigFlags(FLAG_WINDOW_HIDDEN);
     if (g_settings.fullscreen && !hidden) SetConfigFlags(FLAG_FULLSCREEN_MODE);
 
-    InitWindow(1280, 720, APP_NAME " v" APP_VERSION);
+    InitWindow(1280, 720, APP_NAME " (" APP_VERSION ")");
     SetTargetFPS(60);
     SetTraceLogLevel(LOG_INFO);
+
+    // raylib binds ESC to WindowShouldClose() by default, which would kill the
+    // game from any screen. We handle ESC ourselves (pause / back out of menus).
+    SetExitKey(0);
 
     // raylib 6.x does NOT auto-initialize the audio device: without this call
     // every LoadSound fails ("Failed to create data conversion pipeline").
@@ -178,8 +182,10 @@ static int cli_list_maps(void)
 static int cli_autotest(const char *mapfile, int frames, const char *outpng)
 {
     g.autotest = true;
-    SetRandomSeed(42);
     game_boot(true);
+    // NOTE: seed AFTER game_boot - InitWindow() reseeds raylib's RNG with the
+    // wall clock (rcore.c), which would make this test nondeterministic
+    SetRandomSeed(42);
     if (!IsWindowReady()) return 2;
 
     game_start_map(mapfile);
@@ -200,6 +206,25 @@ static int cli_autotest(const char *mapfile, int frames, const char *outpng)
 
     const char *png = outpng ? outpng : "autotest.png";
     TakeScreenshot(png);
+
+    // log where each barrier projects on screen (barrier render verification)
+    for (int i = 0; i < g.map.barrier_count; i++)
+    {
+        const Barrier *b = &g.map.barriers[i];
+        Vector3 c = { b->pos.x, b->pos.y + 1.0f, b->pos.z };
+        Vector2 s = GetWorldToScreen(c, g_camera);
+        printf("BARRIER %d screen=%.0f,%.0f onscreen=%d\n", i, s.x, s.y,
+               (s.x >= 0 && s.x < GetScreenWidth() && s.y >= 0 && s.y < GetScreenHeight()) ? 1 : 0);
+    }
+
+    // same for mystery boxes (beacon verification)
+    for (int i = 0; i < g.map.mbox_count; i++)
+    {
+        Vector3 c = g.map.mboxes[i].pos;
+        Vector2 s = GetWorldToScreen(c, g_camera);
+        printf("MBOX %d screen=%.0f,%.0f onscreen=%d\n", i, s.x, s.y,
+               (s.x >= 0 && s.x < GetScreenWidth() && s.y >= 0 && s.y < GetScreenHeight()) ? 1 : 0);
+    }
 
     int spawned = zombies_total_spawned();
     int alive = zombies_alive_count();
@@ -222,6 +247,44 @@ static int cli_autotest(const char *mapfile, int frames, const char *outpng)
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// --autotest-menu <menu|mapselect|settings|pause> [out.png] : UI screenshot
+// ---------------------------------------------------------------------------
+static int cli_menu_shot(const char *screen, const char *outpng)
+{
+    g.autotest = true;
+    SetRandomSeed(42);
+    game_boot(true);
+    if (!IsWindowReady()) return 2;
+
+    if (strcmp(screen, "pause") == 0)
+    {
+        game_start_map("theater.map");
+        if (!g.map_loaded) { game_shutdown(); return 2; }
+        g.state = GS_PAUSED;
+    }
+    else if (strcmp(screen, "settings") == 0)  g.state = GS_SETTINGS;
+    else if (strcmp(screen, "mapselect") == 0) g.state = GS_MAPSELECT;
+    else                                        g.state = GS_MENU;
+
+    for (int f = 0; f < 45 && !WindowShouldClose(); f++)
+    {
+        g.frame_time = 1.0f / 60.0f;
+        g.time += g.frame_time;
+        ui_update();
+        BeginDrawing();
+        if (g.state == GS_PAUSED && g.map_loaded) game_draw_playing();
+        ui_draw();
+        EndDrawing();
+    }
+
+    const char *png = outpng ? outpng : "menu.png";
+    TakeScreenshot(png);
+    printf("MENUSHOT screen=%s -> %s\n", screen, png);
+    game_shutdown();
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     memset(&g, 0, sizeof(g));
@@ -236,6 +299,9 @@ int main(int argc, char **argv)
         return cli_autotest(argv[2], frames, (argc >= 5) ? argv[4] : NULL);
     }
 
+    if (argc >= 3 && strcmp(argv[1], "--autotest-menu") == 0)
+        return cli_menu_shot(argv[2], (argc >= 4) ? argv[3] : NULL);
+
     if (!game_boot(false)) return 1;
 
     while (!WindowShouldClose() && !g.want_quit)
@@ -245,9 +311,10 @@ int main(int argc, char **argv)
         g.frame_time = dt;
         g.time += dt;
 
-        // update
+        // update: UI first (ESC/pause handling + menu input), then gameplay
+        // only while actually playing (ui_update may switch out of GS_PLAYING)
+        ui_update();
         if (g.state == GS_PLAYING) game_update_playing(dt);
-        else ui_update();
 
         // draw
         BeginDrawing();

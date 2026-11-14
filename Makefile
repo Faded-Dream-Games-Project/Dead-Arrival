@@ -88,6 +88,14 @@ all: $(BIN)
 # ---- link + compile rules (bundled raylib is built as a prerequisite) ------
 ifeq ($(RAYLIB_MODE),bundled)
 
+# Native Wayland build (opt-in, Linux): `make deps RAYLIB_WAYLAND=1 && make RAYLIB_WAYLAND=1`
+# Default = X11 backend, which runs on X11 and via XWayland on Wayland desktops.
+# A Wayland-only build needs: libwayland-dev wayland-protocols libxkbcommon-dev
+RAYLIB_WAYLAND ?= 0
+RL_WAYLAND := $(if $(filter 1 YES TRUE,$(RAYLIB_WAYLAND)),TRUE,FALSE)
+RL_X11     := $(if $(filter 1 YES TRUE,$(RAYLIB_WAYLAND)),FALSE,TRUE)
+RL_BACKEND_STAMP := $(RAYLIB_PATH)/.backend
+
 $(BIN): $(OBJS) $(RAYLIB_PATH)/src/libraylib.a
 	@mkdir -p $(BUILD)
 	$(CC) $(OBJS) $(RAYLIB_PATH)/src/libraylib.a -o $(BIN) $(LDFLAGS) $(LDLIBS)
@@ -97,8 +105,20 @@ $(BUILD)/%.o: $(SRC_DIR)/%.c | $(RAYLIB_PATH)/src/libraylib.a
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
+# fetch + build the bundled raylib (rebuilds if the backend selection changes)
+deps: $(RAYLIB_PATH)/src/libraylib.a
+
 $(RAYLIB_PATH)/src/libraylib.a: deps-cloned
-	$(MAKE) -C $(RAYLIB_PATH)/src PLATFORM=PLATFORM_DESKTOP -j$$(nproc 2>/dev/null || echo 2)
+	@want="$(RL_X11)/$(RL_WAYLAND)"; cur=""; \
+	[ -f "$(RL_BACKEND_STAMP)" ] && cur=$$(cat "$(RL_BACKEND_STAMP)"); \
+	if [ "$$cur" != "$$want" ]; then \
+		echo "== raylib backend: X11=$(RL_X11) WAYLAND=$(RL_WAYLAND)"; \
+		$(MAKE) -C $(RAYLIB_PATH)/src clean; \
+		echo "$$want" > "$(RL_BACKEND_STAMP)"; \
+	fi
+	$(MAKE) -C $(RAYLIB_PATH)/src PLATFORM=PLATFORM_DESKTOP \
+	    GLFW_LINUX_ENABLE_X11=$(RL_X11) GLFW_LINUX_ENABLE_WAYLAND=$(RL_WAYLAND) \
+	    -j$$(nproc 2>/dev/null || echo 2)
 
 deps-cloned:
 	@if [ ! -d "$(RAYLIB_PATH)/src" ]; then \

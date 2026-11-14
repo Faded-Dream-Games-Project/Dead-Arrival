@@ -7,6 +7,10 @@ and survive as many rounds as the horde allows.
 > Dead Arrival is a free fan project. It is **not** published (or ever planned to be published)
 > on Steam or any other store. It is built with [raylib](https://www.raylib.com) **6.2** in
 > plain C99 — no engine, no wrappers.
+>
+> **This repository is in active development on the `dev` branch.** There are no version
+> numbers yet — the first tagged release (GitHub Releases only) will appear once the game
+> is polished enough. What you build from `dev` is a development snapshot.
 
 ![Theater](docs/screenshots/theater.png)
 ![Cemetery](docs/screenshots/cemetery.png)
@@ -86,6 +90,21 @@ cmake --build build -j
 
 Run the game from the repository root so the `assets/` folder is found.
 On Windows, CMake + the VS developer tools work out of the box (raylib is fetched automatically).
+
+### Display backends on Linux (X11 / Wayland)
+
+The default build uses the X11 backend, which runs everywhere — including
+Wayland desktops through XWayland. If you want a **native Wayland** build
+(experimental):
+
+```sh
+sudo apt install libwayland-dev wayland-protocols libxkbcommon-dev
+make deps RAYLIB_WAYLAND=1     # rebuilds raylib with the Wayland backend
+make RAYLIB_WAYLAND=1
+```
+
+Linux is the primary platform; Windows and macOS compile in CI but are less
+tested.
 
 ### Headless regression test
 

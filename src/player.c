@@ -77,12 +77,19 @@ static void player_move(float dt)
 {
     // input direction
     float fwd = 0, strafe = 0;
-    if (IsKeyDown(KEY_W)) fwd += 1;
-    if (IsKeyDown(KEY_S)) fwd -= 1;
-    if (IsKeyDown(KEY_D)) strafe += 1;
-    if (IsKeyDown(KEY_A)) strafe -= 1;
-
-    bool sprint = IsKeyDown(KEY_LEFT_SHIFT) && fwd > 0 && !g_player.ads;
+    bool sprint = false;
+    if (g.autotest)
+    {
+        fwd = 1;   // scripted headless walk (yaw is overridden by the caller)
+    }
+    else
+    {
+        if (IsKeyDown(KEY_W)) fwd += 1;
+        if (IsKeyDown(KEY_S)) fwd -= 1;
+        if (IsKeyDown(KEY_D)) strafe += 1;
+        if (IsKeyDown(KEY_A)) strafe -= 1;
+        sprint = IsKeyDown(KEY_LEFT_SHIFT) && fwd > 0 && !g_player.ads;
+    }
     float speed = PLAYER_WALK_SPEED * (sprint ? PLAYER_SPRINT_MULT : 1.0f)
                                  * (g_player.ads ? 0.6f : 1.0f);
 
@@ -98,17 +105,21 @@ static void player_move(float dt)
     g_player.vel.x = lerpf(g_player.vel.x, wish.x * speed, clampf(accel * dt, 0, 1));
     g_player.vel.z = lerpf(g_player.vel.z, wish.z * speed, clampf(accel * dt, 0, 1));
 
-    if (IsKeyPressed(KEY_SPACE) && g_player.on_ground)
+    if (!g.autotest && IsKeyPressed(KEY_SPACE) && g_player.on_ground)
         g_player.vel.y = PLAYER_JUMP_SPEED;
     g_player.vel.y -= PLAYER_GRAVITY * dt;
 
     map_move_aabb(&g.map, &g_player.pos, &g_player.vel, dt,
                   PLAYER_RADIUS, PLAYER_HEIGHT, PLAYER_STEP_HEIGHT, &g_player.on_ground);
 
-    // barriers always block the player (even with all boards torn)
+    // barriers always block the player (even with all boards torn).
+    // Clamp to whichever side of the wall the player is already on - a
+    // naive smallest-axis pushout can slide the player through the opening
+    // when approaching diagonally.
     for (int i = 0; i < g.map.barrier_count; i++)
     {
-        BoundingBox bb = barrier_bb(&g.map.barriers[i]);
+        const Barrier *b = &g.map.barriers[i];
+        BoundingBox bb = barrier_bb(b);
         BoundingBox e = {
             (Vector3){ g_player.pos.x - PLAYER_RADIUS, g_player.pos.y, g_player.pos.z - PLAYER_RADIUS },
             (Vector3){ g_player.pos.x + PLAYER_RADIUS, g_player.pos.y + PLAYER_HEIGHT, g_player.pos.z + PLAYER_RADIUS }
@@ -117,13 +128,20 @@ static void player_move(float dt)
             e.min.y < bb.max.y && e.max.y > bb.min.y &&
             e.min.z < bb.max.z && e.max.z > bb.min.z)
         {
-            // push out along the smallest axis
-            float dx1 = bb.max.x - e.min.x, dx2 = e.max.x - bb.min.x;
-            float dz1 = bb.max.z - e.min.z, dz2 = e.max.z - bb.min.z;
-            float mx = (dx1 < dx2) ? -dx1 : dx2;
-            float mz = (dz1 < dz2) ? -dz1 : dz2;
-            if (fabsf(mx) < fabsf(mz)) g_player.pos.x += mx;
-            else                       g_player.pos.z += mz;
+            if (b->face <= 1)   // wall runs along X -> clamp along Z
+            {
+                if (g_player.pos.z < b->pos.z)
+                    g_player.pos.z = fminf(g_player.pos.z, bb.min.z - PLAYER_RADIUS);
+                else
+                    g_player.pos.z = fmaxf(g_player.pos.z, bb.max.z + PLAYER_RADIUS);
+            }
+            else                // wall runs along Z -> clamp along X
+            {
+                if (g_player.pos.x < b->pos.x)
+                    g_player.pos.x = fminf(g_player.pos.x, bb.min.x - PLAYER_RADIUS);
+                else
+                    g_player.pos.x = fmaxf(g_player.pos.x, bb.max.x + PLAYER_RADIUS);
+            }
         }
     }
 }

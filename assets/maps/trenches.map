@@ -97,5 +97,5 @@ wallbuy = -13.65 -1.2 0 2 mosin 250
 wallbuy = 13.65 -1.2 0 3 double_barrel 1200
 
 # ---- mystery boxes inside the bunkers ----
-mysterybox = -13 -2.05 0
-mysterybox = 13 -2.05 0
+mysterybox = -13 -2.30 0
+mysterybox = 13 -2.30 0

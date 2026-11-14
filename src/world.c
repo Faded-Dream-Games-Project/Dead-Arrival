@@ -176,27 +176,36 @@ void world_draw(const GameMap *m)
     }
 
     // ---- barriers: boarded openings ----
+    // face 0/1 = wall runs along X, 2/3 = wall runs along Z (see game.h).
+    // Boards face the room; the dark backing sits BEHIND them (zombie side).
     Texture2D *board_tex = assets_tex("barrier_board");
     for (int i = 0; i < m->barrier_count; i++)
     {
         const Barrier *b = &m->barriers[i];
+        Vector3 out = barrier_outward(b);   // direction the zombies come from
 
-        // dark opening backing
-        DrawCube(b->pos, b->size.x * 0.98f, 2.1f, 0.12f, (Color){ 8, 6, 6, 255 });
+        // dark opening backing: thin slab, resting ON the floor (not sunk),
+        // pushed to the zombie side so the boards are in front of it
+        Vector3 back = { b->pos.x + out.x * 0.10f, b->pos.y + 1.05f, b->pos.z + out.z * 0.10f };
+        if (b->face <= 1)
+            DrawCube(back, b->size.x * 0.98f, 2.1f, 0.10f, (Color){ 8, 6, 6, 255 });
+        else
+            DrawCube(back, 0.10f, 2.1f, b->size.x * 0.98f, (Color){ 8, 6, 6, 255 });
 
         // boards: stacked planks, fewer as they get torn off
         float board_h = 2.1f / BARRIER_MAX_BOARDS;
         for (int k = 0; k < b->boards; k++)
         {
             float y = b->pos.y + board_h * (k + 0.5f);
-            float wob = (k % 2 == 0) ? 0.08f : -0.06f;   // slight misalignment
-            Vector3 pos = { b->pos.x + (b->face >= 2 ? 0 : wob), y,
-                            b->pos.z + (b->face >= 2 ? wob : 0) };
+            float wob = (k % 2 == 0) ? 0.08f : -0.06f;   // slight misalignment along the wall
+            Vector3 pos = {
+                b->pos.x - out.x * 0.05f + (b->face <= 1 ? wob : 0.0f), y,
+                b->pos.z - out.z * 0.05f + (b->face >= 2 ? wob : 0.0f) };
             if (b->face <= 1)
-                draw_textured_box(pos, (Vector3){ b->size.x * 0.96f, board_h * 0.92f, 0.1f },
+                draw_textured_box(pos, (Vector3){ b->size.x * 0.96f, board_h * 0.92f, 0.12f },
                                   board_tex, WHITE);
             else
-                draw_textured_box(pos, (Vector3){ 0.1f, board_h * 0.92f, b->size.x * 0.96f },
+                draw_textured_box(pos, (Vector3){ 0.12f, board_h * 0.92f, b->size.x * 0.96f },
                                   board_tex, WHITE);
         }
     }
@@ -221,15 +230,18 @@ void world_draw(const GameMap *m)
         // orient quad to the wall (billboard looks fine on straight walls)
         draw_billboard_quad(c, WALLBUY_ICON_SIZE, chalk, (Color){ 235, 230, 210, 200 });
 
-        // soft glow pulse
+        // soft glow pulse (plate oriented to the wall, not sticking out)
         float pulse = 0.5f + 0.5f * sinf(g.time * 2.0f + i);
         Vector3 glow = c;
         if (w->face == 0) glow.z += 0.03f;
         else if (w->face == 1) glow.z -= 0.03f;
         else if (w->face == 2) glow.x += 0.03f;
         else glow.x -= 0.03f;
-        DrawCube(glow, 1.0f, 0.7f, 0.02f,
-                 (Color){ 120 + (int)(60 * pulse), 100, 40, 60 });
+        Color glow_col = { 120 + (int)(60 * pulse), 100, 40, 60 };
+        if (w->face == 0 || w->face == 1)
+            DrawCube(glow, 1.0f, 0.7f, 0.02f, glow_col);
+        else
+            DrawCube(glow, 0.02f, 0.7f, 1.0f, glow_col);
     }
 
     // ---- mystery boxes ----
@@ -241,6 +253,15 @@ void world_draw(const GameMap *m)
 
         // box body
         draw_textured_box(loc->pos, (Vector3){ 1.1f, 0.7f, 0.75f }, box_tex, WHITE);
+
+        // beacon: bobbing glowing shard in a wire cage above the box, so the
+        // box reads as special/interactable from anywhere on the map
+        {
+            float bob = 0.10f * sinf(g.time * 2.2f + i * 1.3f);
+            Vector3 at = { loc->pos.x, loc->pos.y + 1.15f + bob, loc->pos.z };
+            DrawCubeWires(at, 0.55f, 1.1f, 0.55f, (Color){ 90, 200, 255, 255 });
+            DrawCube(at, 0.16f, 0.30f, 0.16f, (Color){ 150, 220, 255, 255 });
+        }
 
         // glowing seam when active
         if (st->roll_t > 0 || st->offer_t > 0)

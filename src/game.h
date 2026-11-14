@@ -30,7 +30,8 @@ bool cfg_bool(const char *v);
 // Constants
 // ---------------------------------------------------------------------------
 #define APP_NAME             "Dead Arrival"
-#define APP_VERSION          "0.1.1"
+// no version numbers on the dev branch: only GitHub Releases carry versions
+#define APP_VERSION          "dev"
 #define APP_TAGLINE          "A round-based survival FPS"
 #define ASSETS_DIR           "assets"
 

@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   pull_request:
 
 jobs:
@@ -95,3 +95,27 @@ jobs:
         with:
           name: autotest-screenshots-system-raylib
           path: artifacts/
+
+  # Portability tracking: compile-only builds on Windows (MSVC) and macOS.
+  # Linux stays the primary, fully tested platform.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (CMake + MSVC, raylib via FetchContent)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release -j
+      - name: Map discovery check
+        run: build\Release\dead_arrival.exe --list-maps
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (CMake + clang, raylib via FetchContent)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
+      - name: Map discovery check
+        run: ./build/dead_arrival --list-maps
