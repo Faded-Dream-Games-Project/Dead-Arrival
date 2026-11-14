@@ -11,11 +11,12 @@
 // ---------------------------------------------------------------------------
 float ZombieHpForRound(int round) {
     // R1 = 100 (knife 150 one-hits), R2 = 200 (knife needs exactly 2),
-    // +100/round through R9, then +10%/round (slow COD-style ramp).
+    // +100/round through R9 (R9 = 900), then the original CoD Zombies
+    // sharp ramp: +15%/round compounding from round 10.
     if (round <= 1) return 100.0f;
     if (round == 2) return 200.0f;
     if (round <= 9) return 200.0f + (round - 2) * 100.0f;
-    return 700.0f * powf(1.1f, (float)(round - 9));
+    return 900.0f * powf(1.15f, (float)(round - 9));
 }
 
 float ZombieSpeedForRound(int round) {
@@ -39,11 +40,16 @@ static bool SpawnActive(SpawnPoint *s) {
     return g.map.doorOpen[s->doorId];
 }
 
-// A spawn is usable if it has ground and a walkable nav cell (inside map,
-// headroom, not on a wall top). Checked per map in selftest too.
+// A spawn is usable if it has ground under its own feet (probe just above
+// the spawn's y, never from far above: that would snap to an upper floor)
+// and a walkable nav cell.
 static bool SpawnUsable(SpawnPoint *s) {
-    float gy = GroundHeightAt(s->pos.x, s->pos.z, s->pos.y + 6.0f);
-    if (gy < -50) return false;
+    float gy = GroundHeightAt(s->pos.x, s->pos.z, s->pos.y + 0.6f);
+    if (gy < -50 || fabsf(gy - s->pos.y) > 2.5f) {
+        // fallback: old probe window (some spawns sit slightly high)
+        gy = GroundHeightAt(s->pos.x, s->pos.z, s->pos.y + 6.0f);
+        if (gy < -50) return false;
+    }
     Vector3 a = Vec3(s->pos.x, gy, s->pos.z);
     return NavWalkableLine(a, Vec3(a.x + 0.9f, gy, a.z)) ||
            NavWalkableLine(a, Vec3(a.x - 0.9f, gy, a.z)) ||
@@ -51,12 +57,81 @@ static bool SpawnUsable(SpawnPoint *s) {
            NavWalkableLine(a, Vec3(a.x, gy, a.z - 0.9f));
 }
 
-static void SpawnZombie(void) {
-    // pick a random active, usable spawn whose grave/window isn't crowded
+// True if a zombie standing at `from` can path to the player: the nav grid
+// only connects through open doors, so this is the zone check. A spawn behind
+// any buyable door (even one this spawn isn't tagged with) fails here.
+bool ZombieSpawnReachable(Vector3 from, Vector3 playerPos) {
+    Vector3 path[48]; int pathLen = 0;
+    float gy = GroundHeightAt(from.x, from.z, from.y + 0.6f);
+    if (gy < -50 || fabsf(gy - from.y) > 2.5f)
+        gy = GroundHeightAt(from.x, from.z, from.y + 6.0f);
+    if (gy < -50) gy = from.y;
+    return NavFind(Vec3(from.x, gy, from.z), playerPos, path, &pathLen, 48);
+}
+
+// Stuck rescue: move a zombie to a random reachable spawn near the player's
+// current zone so it can rejoin the fight instead of pounding a wall forever.
+void ZombieRespawnNear(Zombie *z, Vector3 playerPos) {
     int candidates[MAX_SPAWNS];
     int n = 0;
-    for (int i = 0; i < g.map.spawnCount; i++)
-        if (SpawnActive(&g.map.spawns[i]) && SpawnUsable(&g.map.spawns[i])) candidates[n++] = i;
+    for (int i = 0; i < g.map.spawnCount; i++) {
+        SpawnPoint *s = &g.map.spawns[i];
+        if (!SpawnActive(s)) continue;
+        // prefer spawns in the player's zone: within 18 m of the player
+        float dx = s->pos.x - playerPos.x, dz = s->pos.z - playerPos.z;
+        if (dx*dx + dz*dz > 18.0f*18.0f) continue;
+        if (!ZombieSpawnReachable(s->pos, playerPos)) continue;
+        candidates[n++] = i;
+    }
+    if (n == 0) {
+        // widen: any active spawn near the player in x/z (same floor),
+        // reachable or not - better than leaving the zombie stuck
+        for (int i = 0; i < g.map.spawnCount; i++) {
+            SpawnPoint *s = &g.map.spawns[i];
+            if (!SpawnActive(s)) continue;
+            float dx = s->pos.x - playerPos.x, dz = s->pos.z - playerPos.z;
+            float dy = s->pos.y - playerPos.y;
+            if (dy*dy > 9.0f) continue;   // stay on the player's floor
+            if (dx*dx + dz*dz > 18.0f*18.0f) continue;
+            candidates[n++] = i;
+        }
+    }
+    if (n == 0) return;
+    SpawnPoint *sp = &g.map.spawns[candidates[RngInt(n)]];
+    z->pos = sp->pos;
+    z->groundY = GroundHeightAt(sp->pos.x, sp->pos.z, sp->pos.y + 6.0f);
+    if (z->groundY < -50) z->groundY = sp->pos.y;
+    z->pos.y = z->groundY;
+    z->pathTimer = 0;
+    z->stuckTimer = 0;
+    z->lastDist = Vec3Len(Vec3Sub(playerPos, z->pos));
+    ParticlesBurst(Vec3(z->pos.x, z->groundY + 1.0f, z->pos.z), 10,
+                   (Color){60, 50, 40, 255}, 2.0f, 0.08f, 0.5f, true);
+}
+
+static void SpawnZombie(void) {
+    // pick a random active, usable spawn the player can actually be reached
+    // from (never behind a closed door), whose grave/window isn't crowded
+    Player *p = &g.player;
+    Vector3 target = Vec3(p->pos.x, p->pos.y, p->pos.z);
+    int candidates[MAX_SPAWNS];
+    int n = 0;
+    for (int i = 0; i < g.map.spawnCount; i++) {
+        SpawnPoint *s = &g.map.spawns[i];
+        if (!SpawnActive(s) || !SpawnUsable(s)) continue;
+        if (!ZombieSpawnReachable(s->pos, target)) continue;
+        candidates[n++] = i;
+    }
+    if (n == 0) {
+        // no reachable spawn right now (e.g. player between floors): fall
+        // back to any active usable spawn rather than freezing the round;
+        // the stuck watchdog will relocate them near the player.
+        for (int i = 0; i < g.map.spawnCount; i++) {
+            SpawnPoint *s = &g.map.spawns[i];
+            if (!SpawnActive(s) || !SpawnUsable(s)) continue;
+            candidates[n++] = i;
+        }
+    }
     if (n == 0) return;
     int tries = 6;
     int pick = -1;
@@ -85,7 +160,9 @@ static void SpawnZombie(void) {
     z->state = sp->grave ? ZS_RISE : ZS_CHASE;
     z->stateTime = 0;
     z->pos = sp->pos;
-    z->groundY = GroundHeightAt(sp->pos.x, sp->pos.z, sp->pos.y + 6.0f);
+    z->groundY = GroundHeightAt(sp->pos.x, sp->pos.z, sp->pos.y + 0.6f);
+    if (z->groundY < -50 || fabsf(z->groundY - sp->pos.y) > 2.5f)
+        z->groundY = GroundHeightAt(sp->pos.x, sp->pos.z, sp->pos.y + 6.0f);
     if (z->groundY < -50) z->groundY = sp->pos.y;
     z->maxHp = ZombieHpForRound(g.round);
     z->hp = z->maxHp;
@@ -93,6 +170,7 @@ static void SpawnZombie(void) {
     z->variant = RngInt(4);
     z->animPhase = RngRange(0, PI*2);
     z->attackCd = 0;
+    z->lastDist = Vec3Len(Vec3Sub(target, z->pos));
     // runners: small chance from round 5+
     z->runner = (g.round >= 5 && RngInt(100) < 4 + g.round);
     if (z->runner) z->speed *= 1.9f;
@@ -207,7 +285,9 @@ void ZombiesUpdate(void) {
                 z->pathTimer = RngRange(0.7f, 1.3f);
                 Vector3 from = Vec3(z->pos.x, z->groundY, z->pos.z);
                 if (!NavFind(from, target, z->path, &z->pathLen, 48)) {
-                    // fallback: straight line
+                    // no route: locked door between us and the player, or fell
+                    // off the nav grid. Count it toward the stuck timer; the
+                    // watchdog below respawns persistent offenders.
                     z->path[0] = target; z->pathLen = 1; z->pathIdx = 0;
                 } else z->pathIdx = 0;
             }
@@ -240,6 +320,16 @@ void ZombiesUpdate(void) {
                 float g2 = GroundHeightAt(z->pos.x, z->pos.z, z->groundY + 0.3f);
                 if (g2 > -50 && z->pos.y > g2 + 0.02f) z->pos.y = g2;
                 z->animPhase += (float)g.dt * (z->runner ? 9.0f : 5.5f);
+            }
+            // stuck watchdog: if the distance to the player hasn't shrunk for
+            // 4 s straight (banging on a wall / locked out of the zone),
+            // respawn at a valid spawn near the player's zone.
+            {
+                float d = Vec3Len(Vec3Sub(target, z->pos));
+                if (d < z->lastDist - 0.05f) z->stuckTimer = 0;
+                else z->stuckTimer += (float)g.dt;
+                z->lastDist = d;
+                if (z->stuckTimer > 4.0f) ZombieRespawnNear(z, target);
             }
             break;
         }

@@ -116,6 +116,8 @@ void GameReset(void) {
     g.boxSpinTimer = 0;
     g.boxResultWeapon = -1;
     g.boxUses = 0;
+    g.powerOn = false;
+    g.papAnim = 0;
     g.hitMarker = g.damageFlash = g.muzzleFlash = 0;
     g.shakeTime = 0;
     g.ziplineT = 0;
@@ -276,11 +278,14 @@ static int RunSelftest(void) {
         if (w->mode != FIRE_MELEE && w->rpm <= 0) { printf("FAIL weapon %s rpm %d\n", w->name, w->rpm); fails++; }
     }
     // knife rule: 150 dmg >= R1 hp (100), < 2*150 >= R2 hp (150) => 2 hits R2
-    float r1 = ZombieHpForRound(1), r2 = ZombieHpForRound(2), r3 = ZombieHpForRound(3);
-    printf("zombie HP: R1=%.0f R2=%.0f R3=%.0f | knife=150\n", r1, r2, r3);
+    float r1 = ZombieHpForRound(1), r2 = ZombieHpForRound(2), r10 = ZombieHpForRound(10), r15 = ZombieHpForRound(15);
+    printf("zombie HP: R1=%.0f R2=%.0f R10=%.0f R15=%.0f | knife=150\n", r1, r2, r10, r15);
     if (r1 > WEAPONS[W_KNIFE].damage) { printf("FAIL knife not 1-hit on R1\n"); fails++; }
     if (r2 <= WEAPONS[W_KNIFE].damage) { printf("FAIL knife 1-hits R2 (needs 2)\n"); fails++; }
     if (r2 > WEAPONS[W_KNIFE].damage * 2) { printf("FAIL knife needs >2 hits on R2\n"); fails++; }
+    // sharp ramp after round 10 (original CoD Zombies: ~+15%/round)
+    if (r10 <= 900.0f) { printf("FAIL R10 hp %.0f not sharply scaled\n", r10); fails++; }
+    if (r15 < r10 * 1.9f) { printf("FAIL R10->R15 ramp too slow (%.0f -> %.0f)\n", r10, r15); fails++; }
     // 20 guns + knife
     int gunCount = 0;
     for (int i = 0; i < NUM_GUNS; i++) if (WEAPONS[i].name[0]) gunCount++;
@@ -291,11 +296,12 @@ static int RunSelftest(void) {
     for (int i = 0; i < NUM_GUNS; i++) totalW += WEAPONS[i].boxWeight;
     if (totalW <= 0) { printf("FAIL no weapons in mystery box\n"); fails++; }
     // maps
+    static const char *mapNames[] = { "Theater", "Bunker", "Graveyard", "DieArise", "DeadCon5" };
     for (int mapi = 0; mapi < MAP_COUNT; mapi++) {
         char err[128] = {0};
         // load map into g.map for nav functions, run checks
         bool ok = MapValidate((MapId)mapi, err, sizeof err);
-        printf("map %d (%s): %s%s\n", mapi, mapi == 0 ? "Theater" : mapi == 1 ? "Bunker" : mapi == 2 ? "Graveyard" : "DieArise",
+        printf("map %d (%s): %s%s\n", mapi, mapNames[mapi],
                ok ? "OK" : "FAIL: ", ok ? "" : err);
         if (!ok) fails++;
     }

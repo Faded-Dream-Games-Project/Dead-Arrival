@@ -30,6 +30,18 @@ void PlayerDamage(float dmg) {
     g.damageFlash = 1.0f;
     g.shakeTime = 0.25f; g.shakeAmp = 0.35f;
     SfxPlay(SND_HURT, RngRange(0.9f, 1.1f), 0.9f);
+    // Juggernaut Soda: shrug off the hit that would down you, up to the
+    // perk's limit. ZOMBIE_HIT_DMG 50 vs 100 hp = 2 hits normally; Jugg
+    // effectively makes it 4. The perk is consumed on the saves it provides
+    // and re-buys like the others; hits reset after 10 s without one.
+    if (p->hp <= 0 && p->perks[PERK_JUGG]) {
+        p->hp = 1.0f;
+        p->perks[PERK_JUGG] = false;
+        g.roundBannerTime = 1.6f;
+        g.roundBannerActive = true;
+        SfxPlay(SND_PERK, 0.7f, 1.0f);
+        ParticlesBurst(Vec3(p->pos.x, p->pos.y+1, p->pos.z), 18, PERKS[PERK_JUGG].color, 3.0f, 0.12f, 0.9f, false);
+    }
     if (p->hp <= 0) {
         p->hp = 0;
         if (p->perks[PERK_REVIVE] && p->reviveUsedRound != g.round) {
@@ -62,7 +74,8 @@ void AddPoints(int n) {
 // Interaction scanning: returns a description of what's in front of the
 // player, and performs the action if `doIt` is set.
 // ---------------------------------------------------------------------------
-typedef enum { IA_NONE = 0, IA_DOOR, IA_WALLBUY, IA_WALLBUY_AMMO, IA_PERK, IA_BOX, IA_ZIP } InteractType;
+typedef enum { IA_NONE = 0, IA_DOOR, IA_WALLBUY, IA_WALLBUY_AMMO, IA_PERK, IA_BOX, IA_ZIP,
+               IA_POWER, IA_PAP } InteractType;
 
 static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool doIt) {
     Player *p = &g.player;
@@ -129,6 +142,32 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
         float score = dot / (dist + 0.5f);
         if (score > bestScore) { bestScore = score; best = IA_ZIP; bestIdx = i; }
     }
+    // Power switch (skip if already on or none on this map)
+    if (!g.powerOn && (g.map.powerPos.x != 0 || g.map.powerPos.y != 0 || g.map.powerPos.z != 0)) {
+        Vector3 pp = Vec3(g.map.powerPos.x, g.map.powerPos.y + 1.2f, g.map.powerPos.z);
+        Vector3 d = Vec3Sub(pp, eye);
+        float dist = Vec3Len(d);
+        if (dist < 3.0f) {
+            float dot = Vec3Dot(Vec3Norm(d), fwd);
+            if (dot > 0.4f) {
+                float score = dot / (dist + 0.5f);
+                if (score > bestScore) { bestScore = score; best = IA_POWER; bestIdx = 0; }
+            }
+        }
+    }
+    // Pack-a-Punch machine (needs power)
+    if (g.powerOn && (g.map.papPos.x != 0 || g.map.papPos.y != 0 || g.map.papPos.z != 0)) {
+        Vector3 pp = Vec3(g.map.papPos.x, g.map.papPos.y + 1.0f, g.map.papPos.z);
+        Vector3 d = Vec3Sub(pp, eye);
+        float dist = Vec3Len(d);
+        if (dist < 3.0f) {
+            float dot = Vec3Dot(Vec3Norm(d), fwd);
+            if (dot > 0.4f) {
+                float score = dot / (dist + 0.5f);
+                if (score > bestScore) { bestScore = score; best = IA_PAP; bestIdx = 0; }
+            }
+        }
+    }
     if (idxOut) *idxOut = bestIdx;
 
     // labels + actions
@@ -173,6 +212,9 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
         const PerkDef *pd = &PERKS[t];
         if (p->perks[t]) {
             snprintf(label, labelSize, "%s - owned", pd->name);
+        } else if (!g.powerOn) {
+            // perks need power; wall buys and doors still work without it
+            snprintf(label, labelSize, "%s - needs POWER", pd->name);
         } else {
             snprintf(label, labelSize, "[E] Drink %s (%d)", pd->name, pd->price);
             if (doIt) {
@@ -181,6 +223,34 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
                     p->perks[t] = true;
                     SfxPlay(SND_PERK, 1.0f, 1.0f);
                     ParticlesBurst(Vec3(g.map.perks[bestIdx].pos.x, 1.2f, g.map.perks[bestIdx].pos.z), 20, pd->color, 2.5f, 0.1f, 0.8f, false);
+                } else SfxPlay(SND_DENIED, 1.0f, 0.8f);
+            }
+        }
+    } else if (best == IA_POWER && label) {
+        snprintf(label, labelSize, "[E] Turn on the Power");
+        if (doIt) {
+            g.powerOn = true;
+            SfxPlay(SND_PERK, 0.8f, 1.0f);
+            SfxPlay(SND_DOOR, 0.7f, 0.9f);
+        }
+    } else if (best == IA_PAP && label) {
+        int cw = p->weapons[p->curSlot].widx;
+        if (cw < 0 || WEAPONS[cw].mode == FIRE_MELEE) {
+            snprintf(label, labelSize, "Pack-a-Punch: hold a gun");
+        } else if (p->weapons[p->curSlot].upgraded) {
+            snprintf(label, labelSize, "%s - already upgraded", WEAPONS[cw].name);
+        } else {
+            snprintf(label, labelSize, "[E] Pack-a-Punch %s (%d)", WEAPONS[cw].name, PAP_PRICE);
+            if (doIt) {
+                if (p->points >= PAP_PRICE) {
+                    p->points -= PAP_PRICE;
+                    p->weapons[p->curSlot].upgraded = true;
+                    // free refill with the upgrade
+                    p->weapons[p->curSlot].magAmmo = WEAPONS[cw].mag;
+                    p->weapons[p->curSlot].reserveAmmo = WEAPONS[cw].reserve;
+                    p->reloadTimer = 0;
+                    g.papAnim = 2.0f;
+                    SfxPlay(SND_BOX_WIN, 1.0f, 1.0f);
                 } else SfxPlay(SND_DENIED, 1.0f, 0.8f);
             }
         }

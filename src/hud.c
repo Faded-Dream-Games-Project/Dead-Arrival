@@ -200,8 +200,11 @@ void HudDrawGameplay(void) {
         else snprintf(ammo, sizeof ammo, "%d / %d", s->magAmmo, s->reserveAmmo);
         int aw = MeasureText(ammo, 34);
         T(ammo, w - aw - 34, h - 60, 34, s->magAmmo == 0 ? (Color){255, 90, 70, 255} : RAYWHITE, true);
-        int nw = MeasureText(wd->name, 20);
-        T(wd->name, w - nw - 34, h - 92, 20, (Color){220, 210, 200, 230}, true);
+        char wname[48];
+        if (s->upgraded) snprintf(wname, sizeof wname, "%s+", wd->name);
+        else snprintf(wname, sizeof wname, "%s", wd->name);
+        int nw = MeasureText(wname, 20);
+        T(wname, w - nw - 34, h - 92, 20, s->upgraded ? (Color){140, 240, 255, 255} : (Color){220, 210, 200, 230}, true);
     }
 
     // ---- top left: round + zombies left ----
@@ -273,12 +276,13 @@ void HudDrawGameplay(void) {
 // ---------------------------------------------------------------------------
 // Menus
 // ---------------------------------------------------------------------------
-static const char *MAP_NAMES[MAP_COUNT] = { "The Grand Theater", "Bunker 44", "Graveyard Hollow", "Die Arise" };
+static const char *MAP_NAMES[MAP_COUNT] = { "The Grand Theater", "Bunker 44", "Graveyard Hollow", "Die Arise", "Dead Con 5" };
 static const char *MAP_DESCS[MAP_COUNT] = {
     "The curtain rose on the end of the world. Hold the stage.",
     "Holding position in the ruins of the final offensive.",
     "The dead were never resting. The church is your only refuge.",
     "The city is gone. Only the rooftops remain - and they go up.",
+    "The Oval Office first. The FBI's secrets are upstairs.",
 };
 
 void HudDrawTitle(void) {
@@ -332,30 +336,30 @@ void HudDrawMapSelect(void) {
 
     float bx = w/2 - 330;
     for (int i = 0; i < MAP_COUNT; i++) {
-        Rectangle r = { bx, 130.0f + i * 108, 660, 96 };
+        Rectangle r = { bx, 118.0f + i * 96, 660, 86 };
         bool hover = CheckCollisionPointRec(GetMousePosition(), r);
         bool locked = false;
         // Die Arise unlocks after reaching round 3 on any map? keep all open but show difficulty
         Color border = hover ? (Color){230, 70, 55, 255} : (Color){110, 35, 32, 255};
         DrawRectangleRec(r, hover ? (Color){45, 16, 15, 240} : (Color){28, 10, 10, 220});
         DrawRectangleLinesEx(r, 2, border);
-        T(MAP_NAMES[i], r.x + 24, r.y + 14, 30, locked ? GRAY : RAYWHITE, false);
-        T(MAP_DESCS[i], r.x + 24, r.y + 52, 18, (Color){200, 190, 185, 220}, false);
+        T(MAP_NAMES[i], r.x + 24, r.y + 12, 28, locked ? GRAY : RAYWHITE, false);
+        T(MAP_DESCS[i], r.x + 24, r.y + 48, 18, (Color){200, 190, 185, 220}, false);
         // difficulty skulls
         for (int d = 0; d < 5; d++) {
             Color dc = d < (i + 2) ? (Color){230, 60, 45, 255} : (Color){70, 40, 38, 255};
-            DrawCircle(r.x + 480 + d*26, r.y + 30, 8, dc);
+            DrawCircle(r.x + 480 + d*26, r.y + 28, 8, dc);
         }
         char best[40];
         snprintf(best, sizeof best, "best: round %d", g.bestRound[i]);
-        T(best, r.x + 480, r.y + 52, 18, (Color){235, 205, 120, 220}, false);
+        T(best, r.x + 480, r.y + 50, 18, (Color){235, 205, 120, 220}, false);
         if (hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
             g.state = STATE_PLAYING;
             GameStart((MapId)i);
         }
     }
     // hard mode toggle under the list
-    Rectangle hm = { w/2.0f - 160, 130.0f + MAP_COUNT * 108 + 14, 320, 48 };
+    Rectangle hm = { w/2.0f - 160, 118.0f + MAP_COUNT * 96 + 10, 320, 44 };
     if (UiToggle(hm, g.hardMode, g.hardMode ? "HARD MODE: ON" : "HARD MODE: OFF", 22)) {
         g.hardMode = !g.hardMode;
         SfxPlay(SND_BUY, g.hardMode ? 0.8f : 1.1f, 0.6f);

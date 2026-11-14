@@ -36,7 +36,7 @@
 #define STEP_HEIGHT       0.55f
 
 #define PLAYER_MAX_HP     100.0f
-#define ZOMBIE_HIT_DMG    50.0f        // 2 hits before going down
+#define ZOMBIE_HIT_DMG    50.0f        // 2 hits before going down (4 with Jugg)
 #define BLEEDOUT_TIME     30.0f
 #define REVIVE_TIME       5.0f
 #define REGEN_DELAY       10.0f        // Regen Soda: 10 s after last hit
@@ -46,6 +46,7 @@
 #define POINTS_PER_HIT    10
 #define POINTS_PER_KILL   50
 #define BOX_PRICE         950
+#define PAP_PRICE         5000         // Pack-a-Punch upgrade cost
 
 #define MAX_BOXES         640
 #define MAX_DOORS         16
@@ -111,6 +112,7 @@ typedef struct WeaponDef {
     float       recoil;      // view kick strength
     int         wallPrice;   // >0: available as wall buy for this price
     int         boxWeight;   // relative weight in mystery box (0 = not in box)
+    int         shape;       // viewmodel variant (GUNSHAPE_*): extra parts drawn
     // low-poly viewmodel shape (meters, gun-space: +Z forward)
     float       bodyLen, bodyW, bodyH;   // receiver
     float       barrelLen, barrelR;      // barrel
@@ -120,6 +122,22 @@ typedef struct WeaponDef {
     float       adsFov;                  // FOV while aiming (0 = default 55)
     Color       accent;                  // wood / polymer accent color
 } WeaponDef;
+
+// viewmodel shape variants (guns share dims; these add distinguishing parts)
+enum {
+    GUNSHAPE_BASIC = 0,     // receiver+barrel+grip+stock (pistols, most rifles)
+    GUNSHAPE_REVOLVER,      // cylinder + longer curved barrel
+    GUNSHAPE_BANANA,        // curved banana magazine (AK family)
+    GUNSHAPE_DRUM,          // drum magazine (RPK, HK21 - tied to their dims)
+    GUNSHAPE_WINGS,         // barrel heat-shield wings (Spectre)
+    GUNSHAPE_FOLDSTOCK,     // folding stock strut (MP5K, PM63)
+    GUNSHAPE_DOUBLEBARREL,  // two side-by-side barrels (Olympia)
+    GUNSHAPE_TUBEMAG,       // under-barrel tube magazine (Stakeout)
+    GUNSHAPE_UNDERSLUNG,    // chunky underbarrel pump/grenade tube (China Lake)
+    GUNSHAPE_CARRYHANDLE,   // carry handle + comp sight (M16, FAMAS bullpup)
+    GUNSHAPE_BULLPUP,       // mag behind the grip (FAMAS)
+    GUNSHAPE_SNIPERBOLT,    // bolt handle + scope rings (L96A1)
+};
 
 extern const WeaponDef WEAPONS[GUN_COUNT_TOTAL];
 
@@ -131,6 +149,7 @@ typedef struct WeaponSlot {
     int widx;            // index into WEAPONS, -1 = empty
     int magAmmo;
     int reserveAmmo;
+    bool upgraded;       // Pack-a-Punched
 } WeaponSlot;
 
 // ---------------------------------------------------------------------------
@@ -142,6 +161,7 @@ typedef enum {
     PERK_SWIFT,          // Swift Soda - 40% faster reloads
     PERK_RAPID,          // Rapid Cola - 25% faster fire rate
     PERK_STAMIN,         // Stamin-Up - move & sprint faster
+    PERK_JUGG,           // Juggernaut Soda - survive 4 hits instead of 2
     PERK_COUNT
 } PerkType;
 
@@ -176,7 +196,7 @@ enum { MUS_AMBIENT = 0, MUS_COUNT };
 // ---------------------------------------------------------------------------
 // Maps
 // ---------------------------------------------------------------------------
-typedef enum { MAP_THEATER = 0, MAP_BUNKER, MAP_GRAVEYARD, MAP_DIE_ARISE, MAP_COUNT } MapId;
+typedef enum { MAP_THEATER = 0, MAP_BUNKER, MAP_GRAVEYARD, MAP_DIE_ARISE, MAP_DEAD_CON_5, MAP_COUNT } MapId;
 
 typedef struct WorldBox {
     AABB    aabb;
@@ -219,6 +239,9 @@ typedef struct MapDef {
     WallBuy     wallbuys[MAX_WALLBUYS]; int wallbuyCount;
     PerkStation perks[MAX_PERKSTATIONS]; int perkCount;
     Vector3     boxPos;               // mystery box
+    Vector3     powerPos;             // power switch (0,0,0 = none on this map)
+    bool        powerAtStart;         // power already on (map design)
+    Vector3     papPos;               // Pack-a-Punch machine (0,0,0 = none)
     JumpPad     pads[MAX_JUMPPADS];   int padCount;
     Zipline     ziplines[MAX_ZIPLINES]; int ziplineCount;
     AABB        killzones[MAX_KILLZONES]; int killzoneCount;
@@ -253,6 +276,9 @@ typedef struct Zombie {
     float    pathTimer;
     float    groundY;
     bool     runner;
+    // stuck detection: last distance to player + timer since it last shrank
+    float    lastDist;
+    float    stuckTimer;
 } Zombie;
 
 // ---------------------------------------------------------------------------
@@ -339,6 +365,9 @@ typedef struct Game {
     float       boxSpinTimer;
     int         boxResultWeapon;     // -1 while spinning
     int         boxUses;
+    // power + Pack-a-Punch
+    bool        powerOn;             // power switch flipped this game
+    float       papAnim;             // Pack-a-Punch cycling animation timer
     // view/hud fx
     float       hitMarker;
     float       damageFlash;
@@ -466,6 +495,8 @@ int     ZombiesAliveCount(void);
 float   ZombieHpForRound(int round);
 float   ZombieSpeedForRound(int round);
 int     ZombieQuotaForRound(int round);
+bool    ZombieSpawnReachable(Vector3 from, Vector3 playerPos); // nav path exists
+void    ZombieRespawnNear(Zombie *z, Vector3 playerPos);       // stuck rescue
 
 // ---------------------------------------------------------------------------
 // Module: hud

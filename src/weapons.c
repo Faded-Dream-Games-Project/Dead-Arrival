@@ -93,6 +93,10 @@ static void DoShot(void) {
     int widx = p->weapons[p->curSlot].widx;
     const WeaponDef *w = &WEAPONS[widx];
     WeaponSlot *s = &p->weapons[p->curSlot];
+    float dmg = (float)w->damage;
+    // Pack-a-Punch: 2.5x damage, enough to keep pace past round 10's
+    // sharp health ramp
+    if (s->upgraded) dmg *= 2.5f;
 
     // sound category
     int snd = SND_SHOT_LIGHT;
@@ -119,7 +123,7 @@ static void DoShot(void) {
             Vector3 up = Vec3Cross(right, fwd);
             dir = Vec3Norm(Vec3Add(Vec3Add(dir, Vec3Scale(right, cosf(a)*r)), Vec3Scale(up, sinf(a)*r)));
         }
-        FireBullet(origin, dir, (float)w->damage);
+        FireBullet(origin, dir, dmg);
     }
     s->magAmmo--;
     p->recoilKick = LERP(p->recoilKick, w->recoil * 0.05f, 1.0f);
@@ -376,8 +380,9 @@ void WeaponDrawViewmodel(Camera3D cam) {
     GUN_PART(0, w->bodyH*0.5f + w->sightH*0.5f, w->bodyLen + w->barrelLen*0.92f, 0.012f, w->sightH, 0.014f, dark);
     // rear sight
     GUN_PART(0, w->bodyH*0.5f + w->sightH*0.4f, 0.02f, 0.030f, w->sightH*0.6f, 0.012f, dark);
-    // magazine
-    if (w->magH > 0) GUN_PART(0, -w->magH*0.5f - 0.01f, w->bodyLen*0.42f, w->magW, w->magH, w->magW*2.2f, accent);
+    // magazine (skipped for revolver / double-barrel / tube-mag variants)
+    if (w->magH > 0 && w->shape != GUNSHAPE_TUBEMAG)
+        GUN_PART(0, -w->magH*0.5f - 0.01f, w->bodyLen*0.42f, w->magW, w->magH, w->magW*2.2f, accent);
     // grip
     GUN_PART(0, -0.055f, w->bodyLen*0.16f, 0.032f, 0.09f, 0.042f, accent);
     // stock
@@ -386,6 +391,82 @@ void WeaponDrawViewmodel(Camera3D cam) {
     if (w->mode == FIRE_PUMP) GUN_PART(0, w->bodyH*0.1f, w->bodyLen + w->barrelLen*0.35f, 0.045f, 0.038f, 0.13f, accent);
     // scope for sniper
     if (w->adsFov < 40) GUN_PART(0, w->bodyH*0.55f + 0.03f, w->bodyLen*0.5f, 0.026f, 0.026f, 0.16f, dark);
+
+    // ---- per-shape distinguishing parts ----
+    switch (w->shape) {
+    case GUNSHAPE_REVOLVER:
+        // cylinder where a magazine would be
+        GUN_PART(0, -0.012f, w->bodyLen*0.55f, 0.055f, 0.055f, 0.055f, dark);
+        // curved steel frame over the barrel
+        GUN_PART(0, w->bodyH*0.5f + 0.008f, w->bodyLen*0.6f + w->barrelLen*0.25f, 0.014f, 0.012f, w->barrelLen*0.5f, dark);
+        break;
+    case GUNSHAPE_BANANA:
+        // second curved mag block, swept forward like an AK banana mag
+        GUN_PART(0.008f, -w->magH*0.5f - 0.05f, w->bodyLen*0.42f + 0.045f, w->magW*0.9f, w->magH*0.75f, w->magW*2.0f, accent);
+        // wooden handguard ring around the barrel
+        GUN_PART(0, w->bodyH*0.28f, w->bodyLen + w->barrelLen*0.3f, 0.052f, 0.048f, w->barrelLen*0.3f, accent);
+        break;
+    case GUNSHAPE_DRUM:
+        // drum magazine: wide cylinder under the receiver (RPK / HK21 look)
+        GUN_PART(0, -w->magH*0.5f - 0.055f, w->bodyLen*0.4f, 0.10f, 0.085f, 0.115f, dark);
+        // bipod folded along the barrel
+        GUN_PART(0.028f, w->bodyH*0.3f, w->bodyLen + w->barrelLen*0.55f, 0.012f, 0.012f, w->barrelLen*0.3f, dark);
+        GUN_PART(-0.028f, w->bodyH*0.3f, w->bodyLen + w->barrelLen*0.55f, 0.012f, 0.012f, w->barrelLen*0.3f, dark);
+        break;
+    case GUNSHAPE_WINGS:
+        // heat-shield fins flanking the barrel
+        GUN_PART( 0.03f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, 0.010f, 0.034f, w->barrelLen*0.8f, dark);
+        GUN_PART(-0.03f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, 0.010f, 0.034f, w->barrelLen*0.8f, dark);
+        // top charging handle
+        GUN_PART(0, w->bodyH*0.5f + 0.012f, w->bodyLen*0.3f, 0.016f, 0.014f, 0.06f, dark);
+        break;
+    case GUNSHAPE_FOLDSTOCK:
+        // folded stock strut sticking back over the receiver
+        GUN_PART(0, w->bodyH*0.45f, -w->stockLen*0.5f - 0.02f, 0.020f, 0.018f, w->stockLen*0.8f, dark);
+        // vertical foregrip ahead of the mag
+        GUN_PART(0, -0.065f, w->bodyLen*0.72f, 0.024f, 0.07f, 0.030f, accent);
+        break;
+    case GUNSHAPE_DOUBLEBARREL:
+        // twin barrels side by side
+        GUN_PART( 0.019f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, w->barrelR*1.7f, w->barrelR*1.7f, w->barrelLen, dark);
+        GUN_PART(-0.019f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, w->barrelR*1.7f, w->barrelR*1.7f, w->barrelLen, dark);
+        // silver break-action hinge
+        GUN_PART(0, 0.0f, w->bodyLen*0.85f, 0.058f, 0.045f, 0.03f, ((Color){160,160,168,255}));        break;
+    case GUNSHAPE_TUBEMAG:
+        // under-barrel shell tube
+        GUN_PART(0, -w->bodyH*0.42f, w->bodyLen + w->barrelLen*0.45f, 0.036f, 0.036f, w->barrelLen*0.7f, dark);
+        // shell carrier latch
+        GUN_PART(0, -w->bodyH*0.42f, w->bodyLen + w->barrelLen*0.15f, 0.046f, 0.02f, 0.03f, accent);
+        break;
+    case GUNSHAPE_UNDERSLUNG:
+        // fat grenade tube under the barrel
+        GUN_PART(0, -w->bodyH*0.5f, w->bodyLen + w->barrelLen*0.4f, 0.062f, 0.062f, w->barrelLen*0.62f, dark);
+        break;
+    case GUNSHAPE_CARRYHANDLE:
+        // carry handle over the receiver
+        GUN_PART(0, w->bodyH*0.5f + 0.035f, w->bodyLen*0.5f, 0.020f, 0.026f, w->bodyLen*0.55f, dark);
+        // front sight tower on the barrel
+        GUN_PART(0, w->bodyH*0.35f + w->sightH*0.5f, w->bodyLen + w->barrelLen*0.8f, 0.026f, w->sightH, 0.026f, dark);
+        break;
+    case GUNSHAPE_BULLPUP:
+        // magazine behind the grip, inside the stock shell
+        GUN_PART(0, -0.055f, -w->bodyLen*0.22f, 0.044f, 0.15f, 0.058f, accent);
+        // cheek riser on top of the stock
+        GUN_PART(0, w->bodyH*0.5f, -w->bodyLen*0.25f, 0.030f, 0.02f, w->bodyLen*0.3f, dark);
+        // forward pistol grip
+        GUN_PART(0, -0.07f, w->bodyLen*0.55f, 0.022f, 0.075f, 0.028f, dark);
+        break;
+    case GUNSHAPE_SNIPERBOLT:
+        // bolt handle on the right side
+        GUN_PART(0.05f, w->bodyH*0.2f, w->bodyLen*0.35f, 0.05f, 0.012f, 0.012f, dark);
+        // scope rings
+        GUN_PART(0, w->bodyH*0.5f + 0.005f, w->bodyLen*0.3f, 0.032f, 0.02f, 0.024f, dark);
+        GUN_PART(0, w->bodyH*0.5f + 0.005f, w->bodyLen*0.68f, 0.032f, 0.02f, 0.024f, dark);
+        break;
+    case GUNSHAPE_BASIC:
+    default:
+        break;
+    }
     #undef GUN_PART
 }
 
