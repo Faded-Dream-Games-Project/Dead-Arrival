@@ -392,6 +392,79 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
 }
 
 // ---------------------------------------------------------------------------
+// Viewmodel shape test: render the same gun at several yaw/pitch angles and
+// measure its projected silhouette. The gun is drawn alone on a solid magenta
+// background (no world), so non-magenta pixels are exactly the silhouette.
+// The camera rotates around a fixed player, so the silhouette must be nearly
+// identical at every angle - if any part shears/bloats at off-axis angles
+// (the old GUN_PART bug), the counts diverge and this fails.
+// ---------------------------------------------------------------------------
+static int RunVmTest(const char *outdir) {
+    SetConfigFlags(FLAG_WINDOW_HIDDEN);
+    InitWindow(1280, 720, "vmtest");
+    InitAudioDevice();
+    SetTargetFPS(60);
+    LoadSettings(); LoadScores();
+    SfxSetVolume(g.volMaster, g.volSfx);
+    AssetsLoad();
+    HudInitFont();
+    GfxInit();
+    GameStart(MAP_THEATER);
+    g.roundBannerActive = false;
+    g.player.raiseTimer = 0;   // gun fully raised
+    g.player.bobPhase = 0;     // no bob noise
+
+    // camera-relative angles to sample: axis-aligned and off-axis (the ones
+    // that triggered the old fabsf-axis bug), including diagonal pitch/yaw
+    static const float angles[][2] = {
+        { 0, 0 }, { 45, 0 }, { 90, 0 }, { 30, 20 }, { 210, -15 }, { 135, 35 },
+    };
+    int n = (int)(sizeof angles / sizeof angles[0]);
+    long counts[8] = {0};
+    for (int i = 0; i < n; i++) {
+        g.player.yaw = angles[i][0];
+        g.player.pitch = angles[i][1];
+        // settle one frame
+        for (int warm = 0; warm < 3; warm++) {
+            BeginDrawing();
+            ClearBackground(MAGENTA);
+            Camera3D cam = BuildCamera();
+            GfxBegin(cam);
+            WeaponDrawViewmodel(cam);
+            GfxEnd();
+            EndDrawing();
+        }
+        char path[256];
+        snprintf(path, sizeof path, "%s/vm_%02d_y%+.0f_p%+.0f.png", outdir, i, angles[i][0], angles[i][1]);
+        TakeScreenshot(path);
+        Image img = LoadImageFromScreen();
+        long gun = 0;
+        Color *px = LoadImageColors(img);
+        for (int y = 0; y < img.height; y++)
+            for (int x = 0; x < img.width; x++) {
+                Color c = px[y*img.width + x];
+                // anything that is not the magenta background is gun
+                if (!(c.r > 200 && c.b > 200 && c.g < 80)) gun++;
+            }
+        UnloadImageColors(px);
+        UnloadImage(img);
+        counts[i] = gun;
+        printf("vm angle %d (yaw %+.0f pitch %+.0f): %ld gun px\n", i, angles[i][0], angles[i][1], gun);
+    }
+    CloseAudioDevice();
+    CloseWindow();
+    // all angles must be within 12% of the mean silhouette size
+    long total = 0;
+    for (int i = 0; i < n; i++) total += counts[i];
+    double mean = (double)total / n;
+    long mn = counts[0], mx = counts[0];
+    for (int i = 1; i < n; i++) { if (counts[i] < mn) mn = counts[i]; if (counts[i] > mx) mx = counts[i]; }
+    bool ok = (mx - mean) <= mean * 0.12 && (mean - mn) <= mean * 0.12;
+    printf("vmtest: %s (mean %.1f, min %ld, max %ld)\n", ok ? "OK" : "FAIL", mean, mn, mx);
+    return ok ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
@@ -407,6 +480,9 @@ int main(int argc, char **argv) {
             const char *outdir = argv[i+1];
             int mapId = atoi(argv[i+2]);
             return RunSmoke(outdir, mapId, 4.0f);
+        }
+        if (!strcmp(argv[i], "--vmtest") && i + 1 < argc) {
+            return RunVmTest(argv[i+1]);
         }
     }
 

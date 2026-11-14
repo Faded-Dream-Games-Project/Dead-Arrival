@@ -5,8 +5,8 @@ COD-zombies-style difficulty curve: zombies get slowly tougher each round, you e
 for every hit and kill, buy weapons off walls, gamble on the Mystery Box, drink perk sodas,
 and open doors to expand the map — until you go down.
 
-> **Dev build** — this branch (`dev`) is the active development version (`v dev`).
-> The first numbered release will be 0.1.0 on `main`.
+> **Dev build** — `main` is the development version and shows `dev` in-game.
+> Versioned builds exist only as GitHub Releases; the first will be **0.1.0**.
 
 ![Dead Arrival](textures/logo.png)
 

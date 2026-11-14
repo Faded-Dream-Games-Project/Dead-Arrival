@@ -221,10 +221,10 @@ void PlayerUpdate(void) {
     // ---- mouse look ----
     // sens 0.2..20 (slider is exponential); no acceleration, no smoothing,
     // no clamping beyond pitch limits: mouse in -> rotation out, same frame.
-    // Base 0.03 deg/count: default sens 1.0 turns 180 deg in ~7 cm of desk
-    // travel on an 800 CPI mouse - one short swipe.
+    // Base 0.057 deg/count: default sens 1.0 turns 180 deg in one short
+    // (~10 cm) swipe on an 800 CPI mouse.
     Vector2 md = GetMouseDelta();
-    float sens = g.sens * 0.03f;
+    float sens = g.sens * 0.057f;
     if (p->adsBlend > 0.5f) sens *= 0.6f;
     p->yaw   -= md.x * sens;
     p->pitch -= md.y * sens * (g.invertY ? -1.0f : 1.0f);
