@@ -105,8 +105,20 @@ static bool game_boot(bool hidden)
 
     InitWindow(1280, 720, APP_NAME " v" APP_VERSION);
     SetTargetFPS(60);
-    SetMasterVolume(g_settings.volume_master);
     SetTraceLogLevel(LOG_INFO);
+
+    // raylib 6.x does NOT auto-initialize the audio device: without this call
+    // every LoadSound fails ("Failed to create data conversion pipeline").
+    InitAudioDevice();
+    if (IsAudioDeviceReady())
+    {
+        TraceLog(LOG_INFO, "GAME: audio device ready");
+        SetMasterVolume(g_settings.volume_master);
+    }
+    else
+    {
+        TraceLog(LOG_WARNING, "GAME: audio device unavailable, running silent");
+    }
 
     assets_load_all();
 
@@ -139,6 +151,7 @@ static void game_shutdown(void)
 {
     if (g.map_loaded) map_unload(&g.map);
     assets_unload_all();
+    if (IsAudioDeviceReady()) CloseAudioDevice();
     CloseWindow();
 }
 

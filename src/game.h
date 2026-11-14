@@ -30,7 +30,7 @@ bool cfg_bool(const char *v);
 // Constants
 // ---------------------------------------------------------------------------
 #define APP_NAME             "Dead Arrival"
-#define APP_VERSION          "0.1.0"
+#define APP_VERSION          "0.1.1"
 #define APP_TAGLINE          "A round-based survival FPS"
 #define ASSETS_DIR           "assets"
 
@@ -105,11 +105,14 @@ float v3_dist_xz(Vector3 a, Vector3 b);       // horizontal distance
 float angle_lerp(float a, float b, float t);  // shortest-path yaw lerp
 
 // bounded string copy (always NUL-terminated, no format-truncation noise)
+// note: src must be a regular NUL-terminated C string (all callers pass one)
 static inline void str_copy(char *dst, size_t dstlen, const char *src)
 {
     if (dstlen == 0) return;
-    strncpy(dst, src, dstlen - 1);
-    dst[dstlen - 1] = '\0';
+    size_t n = strlen(src);
+    if (n >= dstlen) n = dstlen - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
 }
 
 // ---------------------------------------------------------------------------

@@ -500,11 +500,14 @@ void player_update(float dt, bool input_enabled)
     if (g_player.hp <= 0) { player_update_camera(dt); return; }
 
     // ---- look ----
+    // Convention: forward = (-cos(yaw)cos(pitch), sin(pitch), -sin(yaw)cos(pitch)),
+    // so INCREASING yaw turns the view to the right -> mouse right adds to yaw.
+    // Mouse up (md.y < 0) increases pitch -> looks up (standard, non-inverted).
     if (input_enabled && !g.autotest)
     {
         Vector2 md = GetMouseDelta();
         float sens = 0.0022f * g_settings.sensitivity;
-        g_player.yaw   -= md.x * sens;
+        g_player.yaw   += md.x * sens;
         g_player.pitch -= md.y * sens * (g_settings.invert_y ? -1.0f : 1.0f);
         g_player.pitch = clampf(g_player.pitch, CAMERA_MIN_PITCH, CAMERA_MAX_PITCH);
     }
@@ -610,19 +613,84 @@ void player_update(float dt, bool input_enabled)
 
 // ---------------------------------------------------------------------------
 // Viewmodel (procedural, box-built; silhouette varies by weapon class)
+// Drawn in CAMERA space (rotates with the view) via a shared unit cube mesh,
+// so the weapon stays locked to the screen like a proper FPS viewmodel.
 // ---------------------------------------------------------------------------
-static void vm_box(Vector3 at, Vector3 size, Color tint, float tilt_z)
+static Mesh s_vm_cube = { 0 };
+static bool s_vm_ready = false;
+static Material s_vm_mat = { 0 };
+
+static void vm_ensure(void)
 {
-    (void)tilt_z;
-    // convert camera-space offset to world and draw a colored box
+    if (s_vm_ready) return;
+    static Vector3 verts[24], norms[24];
+    static Vector2 uvs[24];
+    static unsigned short idx[36];
+    struct { Vector3 n; Vector3 a, b, c, d; } faces[6] = {
+        { {0,0, 1}, {-0.5f,-0.5f, 0.5f}, { 0.5f,-0.5f, 0.5f}, { 0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f} },
+        { {0,0,-1}, { 0.5f,-0.5f,-0.5f}, {-0.5f,-0.5f,-0.5f}, {-0.5f, 0.5f,-0.5f}, { 0.5f, 0.5f,-0.5f} },
+        { { 1,0,0}, { 0.5f,-0.5f, 0.5f}, { 0.5f,-0.5f,-0.5f}, { 0.5f, 0.5f,-0.5f}, { 0.5f, 0.5f, 0.5f} },
+        { {-1,0,0}, {-0.5f,-0.5f,-0.5f}, {-0.5f,-0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f,-0.5f} },
+        { {0, 1,0}, {-0.5f, 0.5f, 0.5f}, { 0.5f, 0.5f, 0.5f}, { 0.5f, 0.5f,-0.5f}, {-0.5f, 0.5f,-0.5f} },
+        { {0,-1,0}, {-0.5f,-0.5f,-0.5f}, { 0.5f,-0.5f,-0.5f}, { 0.5f,-0.5f, 0.5f}, {-0.5f,-0.5f, 0.5f} },
+    };
+    for (int i = 0; i < 6; i++)
+    {
+        Vector3 *v = &verts[i * 4];
+        v[0] = faces[i].a; v[1] = faces[i].b; v[2] = faces[i].c; v[3] = faces[i].d;
+        for (int j = 0; j < 4; j++)
+        {
+            norms[i * 4 + j] = faces[i].n;
+            uvs[i * 4 + j] = (Vector2){ (j == 1 || j == 2) ? 1.0f : 0.0f,
+                                        (j >= 2) ? 1.0f : 0.0f };
+        }
+        unsigned short *ix = &idx[i * 6];
+        ix[0] = i * 4 + 0; ix[1] = i * 4 + 1; ix[2] = i * 4 + 2;
+        ix[3] = i * 4 + 0; ix[4] = i * 4 + 2; ix[5] = i * 4 + 3;
+    }
+    Mesh m = { 0 };
+    m.vertexCount = 24;
+    m.triangleCount = 12;
+    m.vertices = RL_MALLOC(24 * sizeof(Vector3));
+    m.normals = RL_MALLOC(24 * sizeof(Vector3));
+    m.texcoords = RL_MALLOC(24 * sizeof(Vector2));
+    m.indices = RL_MALLOC(36 * sizeof(unsigned short));
+    memcpy(m.vertices, verts, sizeof(verts));
+    memcpy(m.normals, norms, sizeof(norms));
+    memcpy(m.texcoords, uvs, sizeof(uvs));
+    memcpy(m.indices, idx, sizeof(idx));
+    UploadMesh(&m, false);
+    s_vm_cube = m;
+
+    s_vm_mat = LoadMaterialDefault();   // diffuse = white texture -> tint shows as solid colour
+    s_vm_ready = true;
+}
+
+// draw a box in camera space: `at` is right/up/forward from the eye,
+// `size` its extents; the box orientation follows the camera basis
+static void vm_box(Vector3 at, Vector3 size, Color tint)
+{
+    vm_ensure();
+
     Vector3 f = Vector3Normalize(Vector3Subtract(g_camera.target, g_camera.position));
     Vector3 r = Vector3Normalize(Vector3CrossProduct(f, (Vector3){ 0, 1, 0 }));
     Vector3 u = Vector3CrossProduct(r, f);
-    Vector3 world = g_camera.position;
-    world = Vector3Add(world, Vector3Scale(r, at.x));
-    world = Vector3Add(world, Vector3Scale(u, at.y));
-    world = Vector3Add(world, Vector3Scale(f, at.z));
-    DrawCubeV(world, size, tint);
+
+    // basis rotation: local X -> r, local Y -> u, local Z -> f (column-major)
+    Matrix b;
+    b.m0 = r.x;  b.m4 = u.x;  b.m8  = f.x;  b.m12 = 0;
+    b.m1 = r.y;  b.m5 = u.y;  b.m9  = f.y;  b.m13 = 0;
+    b.m2 = r.z;  b.m6 = u.z;  b.m10 = f.z;  b.m14 = 0;
+    b.m3 = 0;    b.m7 = 0;    b.m11 = 0;    b.m15 = 1;
+
+    // world = eye + B * (at + S*v)
+    Matrix mat = MatrixMultiply(
+        MatrixTranslate(g_camera.position.x, g_camera.position.y, g_camera.position.z),
+        MatrixMultiply(b, MatrixMultiply(MatrixTranslate(at.x, at.y, at.z),
+                                         MatrixScale(size.x, size.y, size.z))));
+
+    s_vm_mat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
+    DrawMesh(s_vm_cube, s_vm_mat, mat);
 }
 
 void player_draw_viewmodel(float dt)
@@ -655,38 +723,38 @@ void player_draw_viewmodel(float dt)
     Color wood = (Color){ 110, 72, 44, 255 };
 
     // gun body
-    vm_box((Vector3){ right, down, fwd }, (Vector3){ 0.09f, 0.12f, def->vm_len }, tint, 0);
+    vm_box((Vector3){ right, down, fwd }, (Vector3){ 0.09f, 0.12f, def->vm_len }, tint);
     // barrel
     vm_box((Vector3){ right, down + 0.02f, fwd + def->vm_len * 0.5f },
-           (Vector3){ def->vm_barrel, def->vm_barrel, def->vm_len * 0.7f }, dark, 0);
+           (Vector3){ def->vm_barrel, def->vm_barrel, def->vm_len * 0.7f }, dark);
 
     // class-specific dressing
     switch (def->cls)
     {
         case WCLASS_PISTOL:
-            vm_box((Vector3){ right, down - 0.09f, fwd - 0.12f }, (Vector3){ 0.05f, 0.14f, 0.06f }, dark, 0);
+            vm_box((Vector3){ right, down - 0.09f, fwd - 0.12f }, (Vector3){ 0.05f, 0.14f, 0.06f }, dark);
             break;
         case WCLASS_SMG:
-            vm_box((Vector3){ right, down - 0.10f, fwd - 0.02f }, (Vector3){ 0.05f, 0.18f, 0.06f }, dark, 0);
+            vm_box((Vector3){ right, down - 0.10f, fwd - 0.02f }, (Vector3){ 0.05f, 0.18f, 0.06f }, dark);
             break;
         case WCLASS_RIFLE:
         case WCLASS_SNIPER:
-            vm_box((Vector3){ right, down - 0.07f, fwd - 0.25f }, (Vector3){ 0.06f, 0.10f, 0.30f }, wood, 0);
+            vm_box((Vector3){ right, down - 0.07f, fwd - 0.25f }, (Vector3){ 0.06f, 0.10f, 0.30f }, wood);
             if (def->cls == WCLASS_SNIPER)
-                vm_box((Vector3){ right, down + 0.09f, fwd + 0.05f }, (Vector3){ 0.05f, 0.05f, 0.16f }, dark, 0);
+                vm_box((Vector3){ right, down + 0.09f, fwd + 0.05f }, (Vector3){ 0.05f, 0.05f, 0.16f }, dark);
             break;
         case WCLASS_SHOTGUN:
             vm_box((Vector3){ right, down - 0.06f, fwd + def->vm_len * 0.4f },
-                   (Vector3){ def->vm_barrel * 1.6f, def->vm_barrel * 1.6f, 0.3f }, dark, 0);
-            vm_box((Vector3){ right, down - 0.07f, fwd - 0.25f }, (Vector3){ 0.06f, 0.10f, 0.30f }, wood, 0);
+                   (Vector3){ def->vm_barrel * 1.6f, def->vm_barrel * 1.6f, 0.3f }, dark);
+            vm_box((Vector3){ right, down - 0.07f, fwd - 0.25f }, (Vector3){ 0.06f, 0.10f, 0.30f }, wood);
             break;
         case WCLASS_LMG:
-            vm_box((Vector3){ right, down - 0.12f, fwd }, (Vector3){ 0.14f, 0.14f, 0.18f }, dark, 0);
+            vm_box((Vector3){ right, down - 0.12f, fwd }, (Vector3){ 0.14f, 0.14f, 0.18f }, dark);
             break;
         case WCLASS_SPECIAL:
         {
             Color glow = (Color){ 90, 220, 130, 255 };
-            vm_box((Vector3){ right, down + 0.03f, fwd + 0.1f }, (Vector3){ 0.12f, 0.06f, 0.25f }, glow, 0);
+            vm_box((Vector3){ right, down + 0.03f, fwd + 0.1f }, (Vector3){ 0.12f, 0.06f, 0.25f }, glow);
         }
             break;
         default: break;
@@ -694,5 +762,5 @@ void player_draw_viewmodel(float dt)
 
     // hands
     vm_box((Vector3){ right - 0.02f, down - 0.14f, fwd - 0.18f }, (Vector3){ 0.08f, 0.08f, 0.14f },
-           (Color){ 205, 170, 140, 255 }, 0);
+           (Color){ 205, 170, 140, 255 });
 }

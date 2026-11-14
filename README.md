@@ -69,6 +69,13 @@ make        # builds build/dead_arrival
 ./build/dead_arrival
 ```
 
+**Already have raylib 6.2+ installed system-wide?** You don't need `make deps`:
+the Makefile checks for a system raylib (via `pkg-config`, then the standard
+`/usr[/local]` prefixes) and uses it automatically — the bundled copy is only
+built when no compatible 6.2+ system install exists. Force a specific one with
+`make RAYLIB_MODE=bundled` (or `system-pkgconfig` / `system-header`).
+CMake behaves the same way (`find_package(raylib 6.2)` first, FetchContent fallback).
+
 ### Option B: CMake
 
 ```sh

@@ -7,18 +7,27 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ---- raylib 6.2 via FetchContent (pinned to the exact release tag) ----
-include(FetchContent)
-set(FETCHCONTENT_QUIET OFF)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG        6.2
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(raylib)
+# ---- raylib: prefer a system install (>= 6.2), otherwise fetch 6.2 -------
+# A raylib built and installed with `make install` / `cmake --install`
+# provides raylibConfig.cmake and is picked up automatically here.
+find_package(raylib 6.2 QUIET)
+
+if(NOT raylib_FOUND)
+    message(STATUS "System raylib 6.2+ not found - fetching raylib 6.2 via FetchContent")
+    include(FetchContent)
+    set(FETCHCONTENT_QUIET OFF)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        raylib
+        GIT_REPOSITORY https://github.com/raysan5/raylib.git
+        GIT_TAG        6.2
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(raylib)
+else()
+    message(STATUS "Using system raylib ${raylib_VERSION}")
+endif()
 
 # ---- Dead Arrival ----
 file(GLOB_RECURSE DA_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)

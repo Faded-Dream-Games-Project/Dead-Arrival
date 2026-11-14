@@ -84,8 +84,17 @@ static void load_sound_dir(void)
     if (FileExists(music_path))
     {
         g_assets.menu_music = LoadMusicStream(music_path);
-        g_assets.has_menu_music = true;
-        SetMusicVolume(g_assets.menu_music, 0.45f);
+        if (IsMusicValid(g_assets.menu_music))
+        {
+            g_assets.has_menu_music = true;
+            SetMusicVolume(g_assets.menu_music, 0.45f);
+        }
+        else
+        {
+            TraceLog(LOG_WARNING, "ASSETS: menu music stream could not be created");
+            UnloadMusicStream(g_assets.menu_music);
+            memset(&g_assets.menu_music, 0, sizeof(Music));
+        }
     }
 }
 
@@ -131,6 +140,8 @@ void sfx_play(const char *name, float volume, float pitch)
         TraceLog(LOG_WARNING, "ASSETS: sound '%s' missing", name);
         return;
     }
+    // sound failed to create (e.g. audio device down) -> skip silently
+    if (!IsSoundValid(*s)) return;
     SetSoundVolume(*s, clampf(volume * g_settings.volume_sfx, 0.0f, 1.0f));
     SetSoundPitch(*s, pitch);
     PlaySound(*s);
@@ -146,13 +157,14 @@ void sfx_play_at(const char *name, Vector3 at, float base_vol)
 
 void assets_menu_music(bool play)
 {
-    if (!g_assets.has_menu_music) return;
+    if (!g_assets.has_menu_music || !IsMusicValid(g_assets.menu_music)) return;
     if (play && !IsMusicStreamPlaying(g_assets.menu_music)) PlayMusicStream(g_assets.menu_music);
     else if (!play && IsMusicStreamPlaying(g_assets.menu_music)) StopMusicStream(g_assets.menu_music);
 }
 
 void assets_menu_music_update(void)
 {
-    if (g_assets.has_menu_music && IsMusicStreamPlaying(g_assets.menu_music))
+    if (g_assets.has_menu_music && IsMusicValid(g_assets.menu_music) &&
+        IsMusicStreamPlaying(g_assets.menu_music))
         UpdateMusicStream(g_assets.menu_music);
 }

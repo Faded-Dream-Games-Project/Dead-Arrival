@@ -45,3 +45,53 @@ jobs:
         with:
           name: autotest-screenshots
           path: artifacts/
+
+  # Verifies the "prefer system raylib 6.2" build path: raylib 6.2 is
+  # installed system-wide first, then the plain Make build must detect and
+  # link against it instead of cloning the bundled copy.
+  linux-system-raylib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git cmake \
+            libasound2-dev libx11-dev libxcursor-dev libxi-dev \
+            libxinerama-dev libxrandr-dev libgl-dev \
+            xvfb mesa-utils
+
+      - name: Install raylib 6.2 system-wide
+        run: |
+          git clone --depth 1 --branch 6.2 https://github.com/raysan5/raylib.git /tmp/raylib
+          cmake -S /tmp/raylib -B /tmp/raylib/build \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_GAMES=OFF
+          cmake --build /tmp/raylib/build -j"$(nproc)"
+          sudo cmake --install /tmp/raylib/build
+          sudo ldconfig
+          ls /usr/local/include/raylib.h /usr/local/lib/libraylib.a
+          # raylib's cmake does not ship a pkg-config file, so the build
+          # falls back to header detection - both count as "system install"
+          pkg-config --modversion raylib || true
+
+      - name: Build against system raylib
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" 2>&1 | tee build.log
+          grep -q "system install" build.log
+          test -x build/dead_arrival
+
+      - name: Autotest with system raylib
+        run: |
+          mkdir -p artifacts
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            ./build/dead_arrival --autotest theater.map 1800 artifacts/system_theater.png
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotest-screenshots-system-raylib
+          path: artifacts/
