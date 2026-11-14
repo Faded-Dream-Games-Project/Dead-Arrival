@@ -461,6 +461,35 @@ void ui_draw_hud(void)
     snprintf(buf, sizeof(buf), "%d left", zombies_alive_count() + zombies_pending_count());
     DrawText(buf, 30, H / 2 + 42, 14, (Color){ 150, 60, 60, 255 });
 
+    // ---- perk icons (bottom left, above points) ----
+    {
+        static const Color perk_col[PERK_TYPE_COUNT] = {
+            { 90, 200, 255, 255 }, { 255, 160, 60, 255 },
+            { 120, 220, 120, 255 }, { 220, 60, 60, 255 } };
+        static const char perk_letter[PERK_TYPE_COUNT] = { 'Q', 'D', 'S', 'J' };
+        int px = 24;
+        for (int i = 0; i < PERK_TYPE_COUNT; i++)
+        {
+            if (!g_player.perks[i]) continue;
+            DrawRectangle(px, H - 96, 24, 24, perk_col[i]);
+            DrawRectangleLinesEx((Rectangle){ (float)px, (float)H - 96, 24, 24 }, 2,
+                                 (Color){ 20, 20, 24, 255 });
+            char lb[2] = { perk_letter[i], 0 };
+            DrawText(lb, px + 8, H - 91, 18, (Color){ 20, 20, 24, 255 });
+            px += 32;
+        }
+    }
+
+    // ---- grenades (next to ammo, bottom right) ----
+    if (g_player.grenades > 0)
+    {
+        int gx = W - 190, gy = H - 52;
+        DrawCircle(gx, gy, 9, (Color){ 40, 70, 40, 255 });
+        DrawCircle(gx, gy, 6, (Color){ 70, 110, 65, 255 });
+        snprintf(buf, sizeof(buf), "x%d", g_player.grenades);
+        DrawText(buf, gx + 14, gy - 8, 18, (Color){ 120, 200, 110, 255 });
+    }
+
     // ---- ammo / weapon (bottom right) ----
     const WeaponDef *def = weapons_get(g_player.slots[g_player.cur_slot].def);
     if (def)
@@ -470,8 +499,10 @@ void ui_draw_hud(void)
         int aw = MeasureText(buf, 36);
         DrawText(buf, W - aw - 26, H - 60, 36,
                  s->ammo == 0 ? (Color){ 230, 60, 60, 255 } : RAYWHITE);
-        int nw = MeasureText(def->name, 18);
-        DrawText(def->name, W - nw - 26, H - 20, 18, (Color){ 170, 170, 176, 255 });
+        char nbuf[64];
+        weapon_display_name(s, nbuf, sizeof(nbuf));
+        int nw = MeasureText(nbuf, 18);
+        DrawText(nbuf, W - nw - 26, H - 20, 18, (Color){ 170, 170, 176, 255 });
 
         // second slot indicator
         if (g_player.slots[1 - g_player.cur_slot].def >= 0)
@@ -479,7 +510,8 @@ void ui_draw_hud(void)
             const WeaponDef *od = weapons_get(g_player.slots[1 - g_player.cur_slot].def);
             if (od)
             {
-                snprintf(buf, sizeof(buf), "[%d] %s", 1 - g_player.cur_slot + 1, od->name);
+                snprintf(buf, sizeof(buf), "[%d] %s%s", 1 - g_player.cur_slot + 1,
+                         g_player.slots[1 - g_player.cur_slot].upgraded ? "* " : "", od->name);
                 int ow = MeasureText(buf, 14);
                 DrawText(buf, W - ow - 26, H - 84, 14, (Color){ 130, 130, 136, 255 });
             }
@@ -488,7 +520,7 @@ void ui_draw_hud(void)
         // reload bar
         if (s->reload_t > 0)
         {
-            float t = 1.0f - s->reload_t / fmaxf(def->reload_time, 0.01f);
+            float t = 1.0f - s->reload_t / fmaxf(weapon_reload_time(s), 0.01f);
             DrawRectangle(W / 2 - 80, H - 130, 160, 8, (Color){ 30, 30, 30, 200 });
             DrawRectangle(W / 2 - 80, H - 130, (int)(160 * t), 8, (Color){ 220, 180, 90, 255 });
             draw_centered_text("RELOADING", H - 150, 14, (Color){ 220, 180, 90, 255 });
@@ -509,9 +541,10 @@ void ui_draw_hud(void)
     }
 
     // ---- health vignette ----
-    if (g_player.hp < 45)
+    float hp_frac = (float)g_player.hp / (float)player_max_hp();
+    if (hp_frac < 0.45f)
     {
-        float sev = 1.0f - (float)g_player.hp / 45.0f;
+        float sev = 1.0f - hp_frac / 0.45f;
         // four edge gradients approximated with stacked rects
         for (int i = 0; i < 8; i++)
         {

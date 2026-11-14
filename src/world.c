@@ -210,6 +210,55 @@ void world_draw(const GameMap *m)
         }
     }
 
+    // ---- buyable doors (drawn only while closed) ----
+    Texture2D *door_tex = assets_tex("door");
+    for (int i = 0; i < m->door_count; i++)
+    {
+        const Door *d = &m->doors[i];
+        if (d->open) continue;
+        Vector3 at = { d->pos.x, d->pos.y + 1.15f, d->pos.z };
+        if (d->face <= 1)
+        {
+            draw_textured_box(at, (Vector3){ d->width * 0.98f, 2.3f, 0.14f }, door_tex, WHITE);
+            DrawCubeWires(at, d->width, 2.32f, 0.18f, (Color){ 120, 90, 60, 255 });
+        }
+        else
+        {
+            draw_textured_box(at, (Vector3){ 0.14f, 2.3f, d->width * 0.98f }, door_tex, WHITE);
+            DrawCubeWires(at, 0.18f, 2.32f, d->width, (Color){ 120, 90, 60, 255 });
+        }
+    }
+
+    // ---- perk machines ----
+    {
+        static const char *perk_tex[PERK_TYPE_COUNT] = {
+            "perk_quick", "perk_double", "perk_speed", "perk_jugg" };
+        static const Color perk_glow[PERK_TYPE_COUNT] = {
+            { 90, 200, 255, 255 }, { 255, 160, 60, 255 },
+            { 120, 220, 120, 255 }, { 220, 60, 60, 255 } };
+        for (int i = 0; i < m->perk_count; i++)
+        {
+            const PerkMachine *p = &m->perks[i];
+            Vector3 at = { p->pos.x, p->pos.y + 1.0f, p->pos.z };
+            draw_textured_box(at, (Vector3){ 0.9f, 2.0f, 0.6f },
+                              assets_tex(perk_tex[p->type]), WHITE);
+            float pulse = 0.5f + 0.5f * sinf(g.time * 2.4f + i);
+            Color glow = perk_glow[p->type];
+            glow.a = (unsigned char)(90 + 120 * pulse);
+            DrawCubeWires(at, 0.98f, 2.08f, 0.68f, glow);
+        }
+    }
+
+    // ---- Pack-a-Punch machine ----
+    if (m->has_pap)
+    {
+        Vector3 at = { m->pap_pos.x, m->pap_pos.y + 1.1f, m->pap_pos.z };
+        draw_textured_box(at, (Vector3){ 1.3f, 2.2f, 0.8f }, assets_tex("pap"), WHITE);
+        float pulse = 0.5f + 0.5f * sinf(g.time * 3.2f);
+        Color glow = { 255, 180, 60, (unsigned char)(100 + 120 * pulse) };
+        DrawCubeWires(at, 1.38f, 2.28f, 0.88f, glow);
+    }
+
     // ---- wall buys: glowing chalk icons ----
     Texture2D *chalk = assets_tex("wallbuy_chalk");
     for (int i = 0; i < m->wallbuy_count; i++)

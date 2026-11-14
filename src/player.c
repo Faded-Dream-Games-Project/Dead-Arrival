@@ -19,6 +19,8 @@ void player_reset(Vector3 spawn, float yaw)
     g_player.pitch = 0;
     g_player.hp = PLAYER_MAX_HP;
     g_player.cur_slot = 0;
+    g_player.grenades = GRENADE_START;
+    player_reset_grenades();
 
     for (int i = 0; i < 2; i++) g_player.slots[i].def = -1;
 
@@ -144,6 +146,37 @@ static void player_move(float dt)
             }
         }
     }
+
+    // closed buyable doors block exactly like barriers
+    for (int i = 0; i < g.map.door_count; i++)
+    {
+        const Door *d = &g.map.doors[i];
+        if (d->open) continue;
+        BoundingBox bb = door_bb(d);
+        BoundingBox e = {
+            (Vector3){ g_player.pos.x - PLAYER_RADIUS, g_player.pos.y, g_player.pos.z - PLAYER_RADIUS },
+            (Vector3){ g_player.pos.x + PLAYER_RADIUS, g_player.pos.y + PLAYER_HEIGHT, g_player.pos.z + PLAYER_RADIUS }
+        };
+        if (e.min.x < bb.max.x && e.max.x > bb.min.x &&
+            e.min.y < bb.max.y && e.max.y > bb.min.y &&
+            e.min.z < bb.max.z && e.max.z > bb.min.z)
+        {
+            if (d->face <= 1)
+            {
+                if (g_player.pos.z < d->pos.z)
+                    g_player.pos.z = fminf(g_player.pos.z, bb.min.z - PLAYER_RADIUS);
+                else
+                    g_player.pos.z = fmaxf(g_player.pos.z, bb.max.z + PLAYER_RADIUS);
+            }
+            else
+            {
+                if (g_player.pos.x < d->pos.x)
+                    g_player.pos.x = fminf(g_player.pos.x, bb.min.x - PLAYER_RADIUS);
+                else
+                    g_player.pos.x = fmaxf(g_player.pos.x, bb.max.x + PLAYER_RADIUS);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +229,55 @@ bool player_try_spend(int amount)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Perk / Pack-a-Punch aware weapon + health helpers
+// ---------------------------------------------------------------------------
+int player_max_hp(void)
+{
+    return g_player.perks[PERK_JUGG] ? PLAYER_MAX_HP + PERK_JUGG_BONUS : PLAYER_MAX_HP;
+}
+
+int weapon_mag_size(const WeaponSlot *s)
+{
+    const WeaponDef *d = weapons_get(s->def);
+    if (!d) return 0;
+    return s->upgraded ? d->mag + d->mag / PAP_MAG_BONUS_DIV : d->mag;
+}
+
+float weapon_damage(const WeaponSlot *s)
+{
+    const WeaponDef *d = weapons_get(s->def);
+    if (!d) return 0.0f;
+    return s->upgraded ? d->damage * PAP_DAMAGE_MULT : d->damage;
+}
+
+float weapon_reload_time(const WeaponSlot *s)
+{
+    const WeaponDef *d = weapons_get(s->def);
+    if (!d) return 1.0f;
+    float t = d->reload_time;
+    if (s->upgraded) t *= 0.85f;                          // PaP: slightly faster
+    if (g_player.perks[PERK_SPEED]) t *= PERK_SPEED_RELOAD_MULT;  // speed cola
+    return t;
+}
+
+float weapon_cooldown_time(const WeaponSlot *s)
+{
+    const WeaponDef *d = weapons_get(s->def);
+    if (!d) return 0.5f;
+    float t = 60.0f / (float)d->rpm;
+    if (g_player.perks[PERK_DOUBLE]) t /= PERK_DOUBLE_RPM_MULT;   // double tap
+    return t;
+}
+
+const char *weapon_display_name(const WeaponSlot *s, char *buf, int buflen)
+{
+    const WeaponDef *d = weapons_get(s->def);
+    if (!d) return "";
+    snprintf(buf, buflen, "%s%s", s->upgraded ? "* " : "", d->name);
+    return buf;
+}
+
 void player_switch_slot(int slot)
 {
     if (slot == g_player.cur_slot) return;
@@ -211,14 +293,15 @@ void player_reload_current(void)
 {
     WeaponSlot *s = &g_player.slots[g_player.cur_slot];
     const WeaponDef *def = weapons_get(s->def);
-    if (!def || s->reload_t > 0 || s->ammo >= def->mag || s->reserve <= 0) return;
-    s->reload_t = def->reload_time;
+    if (!def || s->reload_t > 0 || s->ammo >= weapon_mag_size(s) || s->reserve <= 0) return;
+    s->reload_t = weapon_reload_time(s);
     sfx_play("reload", 0.7f, frand_range(0.95f, 1.05f));
 }
 
 static void finish_reload(WeaponSlot *s, const WeaponDef *def)
 {
-    int need = def->mag - s->ammo;
+    (void)def;
+    int need = weapon_mag_size(s) - s->ammo;
     int take = (s->reserve < need) ? s->reserve : need;
     s->ammo += take;
     s->reserve -= take;
@@ -253,7 +336,7 @@ void player_fire_current(void)
     }
 
     s->ammo--;
-    s->cooldown = 60.0f / (float)def->rpm;
+    s->cooldown = weapon_cooldown_time(s);
     g_player.recoil += def->recoil * 0.02f;
     g_player.hits += 0; // hit points awarded per landed bullet below
 
@@ -288,7 +371,7 @@ void player_fire_current(void)
         float wall_dist = rc.hit ? rc.distance : def->range;
 
         int remaining = def->penetrate;
-        float dmg = def->damage;
+        float dmg = weapon_damage(s);
         Vector3 end = Vector3Add(ray.position, Vector3Scale(d, wall_dist));
         bool any_hit = false;
 
@@ -335,10 +418,13 @@ void player_knife(void)
     {
         int killed = 0;
         Vector3 kpos = { 0 };
-        zombies_damage(hits[0].index, KNIFE_DAMAGE,
+        // scales a little with the round so it stays a one-hit kill early on
+        float dmg = 130.0f + g.round * 20.0f;
+        zombies_damage(hits[0].index, dmg,
                        Vector3Add(ray.position, Vector3Scale(dir, hits[0].dist)),
                        false, &killed, &kpos);
         g_player.points += PTS_PER_HIT;
+        sfx_play("knife_hit", 0.8f, frand_range(0.9f, 1.1f));
     }
 }
 
@@ -400,11 +486,54 @@ static int nearest_barrier(float max_dist)
     return best;
 }
 
+static int nearest_door(float max_dist)
+{
+    int best = -1;
+    float bd = max_dist;
+    for (int i = 0; i < g.map.door_count; i++)
+    {
+        if (g.map.doors[i].open) continue;
+        float d = Vector3Distance(g.map.doors[i].pos, g_player.pos);
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+
+static int nearest_perk(float max_dist)
+{
+    int best = -1;
+    float bd = max_dist;
+    for (int i = 0; i < g.map.perk_count; i++)
+    {
+        if (g_player.perks[g.map.perks[i].type]) continue;   // already owned
+        float d = Vector3Distance(g.map.perks[i].pos, g_player.pos);
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+
+static float pap_dist(void)
+{
+    if (!g.map.has_pap) return 1e9f;
+    return Vector3Distance(g.map.pap_pos, g_player.pos);
+}
+
+static int perk_cost(PerkType t)
+{
+    switch (t)
+    {
+        case PERK_DOUBLE: return PERK_COST_DOUBLE;
+        case PERK_SPEED:  return PERK_COST_SPEED;
+        case PERK_JUGG:   return PERK_COST_JUGG;
+        default:          return PERK_COST_QUICK;
+    }
+}
+
 const char *player_interact_prompt(void)
 {
     static char prompt[128];
 
-    // 1) mystery box on offer
+    // 1) mystery box on offer (taking it wins over everything)
     int mb = nearest_mbox(2.6f);
     if (mb >= 0)
     {
@@ -415,18 +544,51 @@ const char *player_interact_prompt(void)
             snprintf(prompt, sizeof(prompt), "[F] Take %s", def ? def->name : "?");
             return prompt;
         }
-        if (st->roll_t <= 0)
+    }
+
+    // 2) buyable door
+    int dr = nearest_door(2.8f);
+    if (dr >= 0)
+    {
+        snprintf(prompt, sizeof(prompt), "[F] Open Door  [%d]", g.map.doors[dr].cost);
+        return prompt;
+    }
+
+    // 3) perk machine
+    int pk = nearest_perk(2.8f);
+    if (pk >= 0)
+    {
+        static const char *perk_names[PERK_TYPE_COUNT] = {
+            "Quick Revive", "Double Tap", "Speed Cola", "Juggernog" };
+        snprintf(prompt, sizeof(prompt), "[F] Buy %s  [%d]",
+                 perk_names[g.map.perks[pk].type], perk_cost(g.map.perks[pk].type));
+        return prompt;
+    }
+
+    // 4) Pack-a-Punch
+    if (pap_dist() < 2.8f)
+    {
+        WeaponSlot *s = &g_player.slots[g_player.cur_slot];
+        if (s->def >= 0 && !s->upgraded)
         {
-            snprintf(prompt, sizeof(prompt), "[F] Open Mystery Box  [%d]", MYSTERY_BOX_COST);
+            char nbuf[64];
+            snprintf(prompt, sizeof(prompt), "[F] Pack-a-Punch %s  [%d]",
+                     weapon_display_name(s, nbuf, sizeof(nbuf)), PAP_COST);
             return prompt;
         }
     }
 
-    // 2) wall buy
+    // 5) wall buy (weapons + grenade refills)
     int wb = nearest_wallbuy(2.4f);
     if (wb >= 0)
     {
         WallBuy *w = &g.map.wallbuys[wb];
+        if (w->weapon == WALLBUY_GRENADES)
+        {
+            snprintf(prompt, sizeof(prompt), "[F] Buy Grenades x%d  [%d]",
+                     GRENADE_MAX, w->price > 0 ? w->price : GRENADE_COST);
+            return prompt;
+        }
         const WeaponDef *def = weapons_get(w->weapon);
         int price = (w->price > 0) ? w->price : def->price;
         bool owned = (g_player.slots[0].def == w->weapon || g_player.slots[1].def == w->weapon);
@@ -437,7 +599,14 @@ const char *player_interact_prompt(void)
         return prompt;
     }
 
-    // 3) barrier repair
+    // 6) mystery box roll
+    if (mb >= 0 && g_mbox[mb].roll_t <= 0)
+    {
+        snprintf(prompt, sizeof(prompt), "[F] Open Mystery Box  [%d]", MYSTERY_BOX_COST);
+        return prompt;
+    }
+
+    // 7) barrier repair
     int br = nearest_barrier(2.6f);
     if (br >= 0)
         return "[F] Rebuild barrier";
@@ -447,32 +616,73 @@ const char *player_interact_prompt(void)
 
 void player_try_interact(void)
 {
-    // 1) mystery box
+    // 1) mystery box offer
     int mb = nearest_mbox(2.6f);
-    if (mb >= 0)
+    if (mb >= 0 && g_mbox[mb].offer_t > 0)
     {
-        MysteryBoxState *st = &g_mbox[mb];
-        if (st->offer_t > 0)
-        {
-            player_give_weapon(st->offer_weapon, true);
-            st->offer_t = 0;
-            sfx_play("buy", 0.8f, 1.0f);
-            return;
-        }
-        if (st->roll_t <= 0 && player_try_spend(MYSTERY_BOX_COST))
-        {
-            st->roll_t = MYSTERY_ROLL_TIME;
-            st->offer_weapon = weapons_random_box_pick();
-            sfx_play("box_jingle", 0.9f, 1.0f);
-            return;
-        }
+        player_give_weapon(g_mbox[mb].offer_weapon, true);
+        g_mbox[mb].offer_t = 0;
+        sfx_play("buy", 0.8f, 1.0f);
+        return;
     }
 
-    // 2) wall buy
+    // 2) door
+    int dr = nearest_door(2.8f);
+    if (dr >= 0)
+    {
+        Door *d = &g.map.doors[dr];
+        if (player_try_spend(d->cost))
+        {
+            d->open = true;
+            sfx_play("door_open", 0.9f, 1.0f);
+            particles_spawn_debris(d->pos, 10);
+        }
+        return;
+    }
+
+    // 3) perk machine
+    int pk = nearest_perk(2.8f);
+    if (pk >= 0)
+    {
+        PerkMachine *p = &g.map.perks[pk];
+        if (player_try_spend(perk_cost(p->type)))
+        {
+            g_player.perks[p->type] = true;
+            if (p->type == PERK_JUGG)
+                g_player.hp = fminf(g_player.hp + PERK_JUGG_BONUS, player_max_hp());
+            sfx_play("perk_buy", 0.9f, 1.0f);
+        }
+        return;
+    }
+
+    // 4) Pack-a-Punch
+    if (pap_dist() < 2.8f)
+    {
+        WeaponSlot *s = &g_player.slots[g_player.cur_slot];
+        if (s->def >= 0 && !s->upgraded && player_try_spend(PAP_COST))
+        {
+            s->upgraded = true;
+            s->ammo = weapon_mag_size(s);       // free full mag on upgrade
+            sfx_play("pap_buy", 0.9f, 1.0f);
+        }
+        return;
+    }
+
+    // 5) wall buy
     int wb = nearest_wallbuy(2.4f);
     if (wb >= 0)
     {
         WallBuy *w = &g.map.wallbuys[wb];
+        if (w->weapon == WALLBUY_GRENADES)
+        {
+            if (g_player.grenades < GRENADE_MAX &&
+                player_try_spend(w->price > 0 ? w->price : GRENADE_COST))
+            {
+                g_player.grenades = GRENADE_MAX;
+                sfx_play("buy", 0.8f, 1.0f);
+            }
+            return;
+        }
         const WeaponDef *def = weapons_get(w->weapon);
         int price = (w->price > 0) ? w->price : def->price;
         bool owned = (g_player.slots[0].def == w->weapon || g_player.slots[1].def == w->weapon);
@@ -492,7 +702,16 @@ void player_try_interact(void)
         return;
     }
 
-    // 3) barrier repair
+    // 6) mystery box roll
+    if (mb >= 0 && g_mbox[mb].roll_t <= 0 && player_try_spend(MYSTERY_BOX_COST))
+    {
+        g_mbox[mb].roll_t = MYSTERY_ROLL_TIME;
+        g_mbox[mb].offer_weapon = weapons_random_box_pick();
+        sfx_play("box_jingle", 0.9f, 1.0f);
+        return;
+    }
+
+    // 7) barrier repair
     int br = nearest_barrier(2.6f);
     if (br >= 0)
     {
@@ -504,6 +723,93 @@ void player_try_interact(void)
             g_player.points += BARRIER_REPAIR_PTS;
             sfx_play("board_repair", 0.8f, frand_range(0.9f, 1.1f));
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Grenades
+// ---------------------------------------------------------------------------
+static Grenade s_grenades[MAX_GRENADES];
+
+void player_reset_grenades(void)
+{
+    memset(s_grenades, 0, sizeof(s_grenades));
+}
+
+void player_throw_grenade(void)
+{
+    if (g_player.grenades <= 0 || g_player.grenade_cd > 0 || g_player.hp <= 0) return;
+    Grenade *g = NULL;
+    for (int i = 0; i < MAX_GRENADES; i++)
+        if (!s_grenades[i].active) { g = &s_grenades[i]; break; }
+    if (!g) return;
+
+    g_player.grenades--;
+    g_player.grenade_cd = GRENADE_THROW_CD;
+
+    Vector3 f = Vector3Normalize(Vector3Subtract(g_camera.target, g_camera.position));
+    g->active = true;
+    g->on_ground = false;
+    g->fuse = GRENADE_FUSE;
+    g->pos = Vector3Add(g_camera.position, Vector3Scale(f, 0.4f));
+    g->vel = Vector3Add(Vector3Scale(f, 13.0f), (Vector3){ g_player.vel.x * 0.5f, 3.5f, g_player.vel.z * 0.5f });
+    sfx_play("grenade_throw", 0.7f, 1.0f);
+}
+
+void player_update_grenades(float dt)
+{
+    for (int i = 0; i < MAX_GRENADES; i++)
+    {
+        Grenade *gr = &s_grenades[i];
+        if (!gr->active) continue;
+
+        gr->fuse -= dt;
+        if (gr->fuse <= 0)
+        {
+            gr->active = false;
+            game_explode_at(gr->pos);
+            continue;
+        }
+
+        // integrate with map collision; bounce on landing / wall hits
+        Vector3 pre = gr->pos;
+        bool on_ground = false;
+        gr->vel.y -= 20.0f * dt;
+        map_move_aabb(&g.map, &gr->pos, &gr->vel, dt, 0.09f, 0.18f, 0.08f, &on_ground);
+
+        if (on_ground && !gr->on_ground && gr->vel.y < -1.5f)
+        {
+            gr->vel.y = -gr->vel.y * 0.45f;
+            gr->vel.x *= 0.65f;
+            gr->vel.z *= 0.65f;
+            sfx_play("grenade_bounce", 0.5f, frand_range(0.9f, 1.1f));
+        }
+        else if (on_ground)
+        {
+            gr->vel.x *= 1.0f - clampf(6.0f * dt, 0, 1);
+            gr->vel.z *= 1.0f - clampf(6.0f * dt, 0, 1);
+        }
+        // stopped by a wall -> reflect roughly
+        float moved = Vector3Distance(pre, gr->pos);
+        if (moved < Vector3Length(gr->vel) * dt * 0.35f && !on_ground)
+        {
+            gr->vel.x = -gr->vel.x * 0.45f;
+            gr->vel.z = -gr->vel.z * 0.45f;
+            sfx_play("grenade_bounce", 0.4f, frand_range(0.9f, 1.1f));
+        }
+        gr->on_ground = on_ground;
+    }
+}
+
+void player_draw_grenades(void)
+{
+    for (int i = 0; i < MAX_GRENADES; i++)
+    {
+        if (!s_grenades[i].active) continue;
+        // blink faster the closer to detonation
+        float blink = (sinf(g.time * (12.0f + 40.0f * (1.0f - s_grenades[i].fuse / GRENADE_FUSE))) > 0) ? 1.0f : 0.4f;
+        DrawCube(s_grenades[i].pos, 0.14f, 0.16f, 0.14f,
+                 (Color){ (unsigned char)(50 * blink), (unsigned char)(80 * blink), 50, 255 });
     }
 }
 
@@ -551,12 +857,20 @@ void player_update(float dt, bool input_enabled)
     // ---- timers ----
     g_player.knife_t    = fmaxf(0, g_player.knife_t - dt);
     g_player.interact_cd= fmaxf(0, g_player.interact_cd - dt);
+    g_player.grenade_cd = fmaxf(0, g_player.grenade_cd - dt);
     g_player.regen_t   += dt;
     for (int b = 0; b < g.map.barrier_count; b++)
         g.map.barriers[b].repair_cd = fmaxf(0, g.map.barriers[b].repair_cd - dt);
 
-    if (g_player.regen_t > PLAYER_REGEN_DELAY && g_player.hp < PLAYER_MAX_HP)
-        g_player.hp = (int)fminf(PLAYER_MAX_HP, g_player.hp + PLAYER_REGEN_RATE * dt);
+    // room tracking (drives room-based zombie spawning)
+    int room = map_room_of(&g.map, g_player.pos);
+    if (room >= 0) g.map.rooms[room].visited = true;
+
+    // health regen (Quick Revive: sooner + faster; Jugg raises the cap)
+    float regen_delay = PLAYER_REGEN_DELAY * (g_player.perks[PERK_QUICK] ? PERK_REGEN_DELAY_MULT : 1.0f);
+    float regen_rate  = PLAYER_REGEN_RATE * (g_player.perks[PERK_QUICK] ? PERK_REGEN_RATE_MULT : 1.0f);
+    if (g_player.regen_t > regen_delay && g_player.hp < player_max_hp())
+        g_player.hp = (int)fminf((float)player_max_hp(), g_player.hp + regen_rate * dt);
 
     // ---- weapon slots ----
     for (int i = 0; i < 2; i++)
@@ -625,6 +939,7 @@ void player_update(float dt, bool input_enabled)
     if (IsKeyPressed(KEY_Q)) player_switch_slot(1 - g_player.cur_slot);
     if (IsKeyPressed(KEY_V) || IsKeyPressed(KEY_F3)) player_knife();
     if (IsKeyPressed(KEY_F) || IsKeyPressed(KEY_E)) player_try_interact();
+    if (IsKeyPressed(KEY_G)) player_throw_grenade();
 
     player_update_camera(dt);
 }
@@ -684,7 +999,7 @@ static void vm_ensure(void)
     s_vm_ready = true;
 }
 
-// draw a box in camera space: `at` is right/up/forward from the eye,
+// draw a box in camera space: `at` is right/down/forward from the eye,
 // `size` its extents; the box orientation follows the camera basis
 static void vm_box(Vector3 at, Vector3 size, Color tint)
 {
@@ -694,18 +1009,29 @@ static void vm_box(Vector3 at, Vector3 size, Color tint)
     Vector3 r = Vector3Normalize(Vector3CrossProduct(f, (Vector3){ 0, 1, 0 }));
     Vector3 u = Vector3CrossProduct(r, f);
 
-    // basis rotation: local X -> r, local Y -> u, local Z -> f (column-major)
-    Matrix b;
-    b.m0 = r.x;  b.m4 = u.x;  b.m8  = f.x;  b.m12 = 0;
-    b.m1 = r.y;  b.m5 = u.y;  b.m9  = f.y;  b.m13 = 0;
-    b.m2 = r.z;  b.m6 = u.z;  b.m10 = f.z;  b.m14 = 0;
-    b.m3 = 0;    b.m7 = 0;    b.m11 = 0;    b.m15 = 1;
+    // world-space center of the box: eye + right/down/forward offsets
+    Vector3 c = Vector3Add(g_camera.position, (Vector3){
+        r.x * at.x + u.x * at.y + f.x * at.z,
+        r.y * at.x + u.y * at.y + f.y * at.z,
+        r.z * at.x + u.z * at.y + f.z * at.z });
 
-    // world = eye + B * (at + S*v)
-    Matrix mat = MatrixMultiply(
-        MatrixTranslate(g_camera.position.x, g_camera.position.y, g_camera.position.z),
-        MatrixMultiply(b, MatrixMultiply(MatrixTranslate(at.x, at.y, at.z),
-                                         MatrixScale(size.x, size.y, size.z))));
+    // right-handed basis [r, u, -f]: det = +1. A [r, u, f] basis mirrors the
+    // geometry (det -1), and with raylib's global backface culling on,
+    // a mirrored box is culled away entirely - this is what made the
+    // viewmodel invisible for so long.
+    Matrix b;
+    b.m0 = r.x;  b.m4 = u.x;  b.m8  = -f.x;  b.m12 = 0;
+    b.m1 = r.y;  b.m5 = u.y;  b.m9  = -f.y;  b.m13 = 0;
+    b.m2 = r.z;  b.m6 = u.z;  b.m10 = -f.z;  b.m14 = 0;
+    b.m3 = 0;    b.m7 = 0;    b.m11 = 0;     b.m15 = 1;
+
+    // NOTE: raymath's MatrixMultiply(A, B) applies A FIRST, then B (same
+    // nesting as the zombie part drawing). So this reads: scale the unit
+    // cube, rotate it into the camera frame, then move it to its world
+    // position. Translating first (the old code) rotates the eye position
+    // itself and throws the box into nonsense space.
+    Matrix mat = MatrixMultiply(MatrixMultiply(MatrixScale(size.x, size.y, size.z), b),
+                                MatrixTranslate(c.x, c.y, c.z));
 
     s_vm_mat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
     DrawMesh(s_vm_cube, s_vm_mat, mat);
@@ -778,7 +1104,24 @@ void player_draw_viewmodel(float dt)
         default: break;
     }
 
-    // hands
-    vm_box((Vector3){ right - 0.02f, down - 0.14f, fwd - 0.18f }, (Vector3){ 0.08f, 0.08f, 0.14f },
+    // hands (kept inside the vertical FOV - bottom of the screen)
+    vm_box((Vector3){ right - 0.02f, down - 0.06f, fwd + 0.05f }, (Vector3){ 0.08f, 0.08f, 0.14f },
            (Color){ 205, 170, 140, 255 });
+
+    // knife slash: blade sweeps in from the right when knifing
+    if (g_player.knife_t > 0)
+    {
+        float prog = 1.0f - g_player.knife_t / KNIFE_CD;   // 0 -> 1 over the swing
+        float sweep = sinf(prog * PI);                      // fast in the middle
+        float kx = 0.30f - 0.42f * sweep;
+        float ky = -0.20f + 0.06f * sinf(prog * PI * 2.0f);
+        float kz = 0.50f + 0.10f * sweep;
+        // blade + guard + handle
+        vm_box((Vector3){ kx, ky + 0.02f, kz + 0.18f }, (Vector3){ 0.035f, 0.06f, 0.30f },
+               (Color){ 205, 208, 215, 255 });              // blade
+        vm_box((Vector3){ kx, ky - 0.02f, kz + 0.02f }, (Vector3){ 0.09f, 0.03f, 0.06f },
+               (Color){ 70, 65, 60, 255 });                 // guard
+        vm_box((Vector3){ kx, ky - 0.02f, kz - 0.08f }, (Vector3){ 0.05f, 0.07f, 0.16f },
+               (Color){ 45, 30, 20, 255 });                 // grip
+    }
 }

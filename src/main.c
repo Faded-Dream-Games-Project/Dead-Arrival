@@ -55,6 +55,7 @@ void game_update_playing(float dt)
         // camera sinks a little, then stops (do not fall through the floor)
         if (s_death_timer < 1.5f) g_player.pos.y -= dt * 0.8f;
         zombies_update(dt, false);
+        player_update_grenades(dt);
         particles_update(dt);
         if (s_death_timer > 1.8f && g.state == GS_PLAYING)
         {
@@ -67,6 +68,7 @@ void game_update_playing(float dt)
     }
 
     player_update(dt, true);
+    player_update_grenades(dt);
     zombies_update_round(dt);
     zombies_update(dt, g_player.hp > 0);
     world_update(dt);
@@ -80,11 +82,25 @@ void game_draw_playing(void)
     BeginMode3D(g_camera);
         world_draw(&g.map);
         zombies_draw();
+        player_draw_grenades();
         particles_draw();
         player_draw_viewmodel(g.frame_time);
     EndMode3D();
 
     ui_draw_hud();
+}
+
+// grenade detonation: AoE zombie damage + visual/audio burst
+void game_explode_at(Vector3 pos)
+{
+    sfx_play_at("explosion", pos, 1.0f);
+    particles_spawn_sparks(pos, 40);
+    particles_spawn_debris(pos, 24);
+    zombies_apply_explosion(pos, GRENADE_RADIUS, GRENADE_DAMAGE);
+    // mild flash/shake when the player is close
+    float pd = Vector3Distance(g_player.pos, pos);
+    if (pd < GRENADE_RADIUS)
+        g_player.hurt_t = fmaxf(g_player.hurt_t, 0.3f * (1.0f - pd / GRENADE_RADIUS));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,10 +210,17 @@ static int cli_autotest(const char *mapfile, int frames, const char *outpng)
     // skip the pre-round grace so spawns begin immediately
     g.round_break_t = 0.0f;
     g.frame_time = 1.0f / 60.0f;
+    // test funds so the scripted buys can exercise doors/perks/PaP
+    g_player.points = 6000;
 
     for (int f = 0; f < frames && !WindowShouldClose(); f++)
     {
         g.time += g.frame_time;
+        // exercise the new systems headlessly: buy whatever is in range
+        // every couple of seconds and throw one grenade mid-run
+        if (f > 0 && f % 120 == 0 && player_interact_prompt()[0])
+            player_try_interact();
+        if (f == 900) player_throw_grenade();
         game_update_playing(g.frame_time);
         BeginDrawing();
         game_draw_playing();
@@ -235,6 +258,17 @@ static int cli_autotest(const char *mapfile, int frames, const char *outpng)
 
     printf("AUTOTEST map=%s frames=%d round=%d spawned=%d alive=%d kills=%d hits=%d points=%d hp=%d\n",
            mapfile, frames, round, spawned, alive, kills, hits, pts, g_player.hp);
+
+    {
+        int doors_open = 0;
+        for (int i = 0; i < g.map.door_count; i++)
+            if (g.map.doors[i].open) doors_open++;
+        printf("AUTOTEST SYSTEMS perks=%d%d%d%d doors=%d/%d pap=%d grenades=%d\n",
+               g_player.perks[0], g_player.perks[1], g_player.perks[2], g_player.perks[3],
+               doors_open, g.map.door_count,
+               (g_player.slots[0].upgraded || g_player.slots[1].upgraded) ? 1 : 0,
+               g_player.grenades);
+    }
 
     game_shutdown();
 

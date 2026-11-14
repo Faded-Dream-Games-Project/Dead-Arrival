@@ -106,11 +106,13 @@ Zombie *zombies_spawn(int idx, bool at_barrier)
 
         if (at_barrier && g.map.spawn_mode == SPAWN_BARRIERS)
         {
-            Barrier *b = &g.map.barriers[idx % g.map.barrier_count];
+            // idx is the direct barrier index (picked in zombies_update_round)
+            int bi = idx % g.map.barrier_count;
+            Barrier *b = &g.map.barriers[bi];
             Vector3 out = barrier_outward(b);
             z->pos = (Vector3){ b->pos.x + out.x * 0.75f, b->pos.y, b->pos.z + out.z * 0.75f };
             z->state = ZSTATE_AT_BARRIER;
-            z->at_barrier = idx % g.map.barrier_count;
+            z->at_barrier = bi;
         }
         else if (g.map.spawn_mode == SPAWN_GRAVES)
         {
@@ -147,7 +149,25 @@ void zombies_update_round(float dt)
             {
                 int pick = GetRandomValue(0, 0x7fffffff);
                 if (g.map.spawn_mode == SPAWN_BARRIERS)
-                    zombies_spawn(pick, true);
+                {
+                    // room-based spawning: strongly prefer barriers in the
+                    // room the player is in; otherwise any visited (opened)
+                    // room. Barriers outside all rooms are always eligible.
+                    int cand[MAX_BARRIERS * 3];
+                    int n = 0;
+                    int proom = map_room_of(&g.map, g_player.pos);
+                    if (proom >= 0) g.map.rooms[proom].visited = true;
+                    for (int i = 0; i < g.map.barrier_count; i++)
+                    {
+                        int br = g.map.barriers[i].room;
+                        if (br < 0) { cand[n++] = i; continue; }
+                        if (br == proom) { cand[n++] = i; cand[n++] = i; cand[n++] = i; }
+                        else if (g.map.rooms[br].visited) cand[n++] = i;
+                    }
+                    if (n == 0)
+                        for (int i = 0; i < g.map.barrier_count; i++) cand[n++] = i;
+                    zombies_spawn(cand[pick % n], true);
+                }
                 else
                     zombies_spawn(pick, false);
                 s_to_spawn--;
@@ -369,6 +389,22 @@ static BoundingBox zombie_head_bb(const Zombie *z)
         (Vector3){ z->pos.x - 0.17f, z->pos.y + 1.42f, z->pos.z - 0.17f },
         (Vector3){ z->pos.x + 0.17f, z->pos.y + 1.75f, z->pos.z + 0.17f }
     };
+}
+
+// grenade / explosion damage: falloff from the center, kills award points
+void zombies_apply_explosion(Vector3 pos, float radius, float max_damage)
+{
+    for (int i = 0; i < MAX_ZOMBIES; i++)
+    {
+        Zombie *z = &g_zombies[i];
+        if (!z->active || z->state == ZSTATE_DYING) continue;
+        float d = Vector3Distance(z->pos, pos);
+        if (d > radius) continue;
+        float dmg = max_damage * (1.0f - d / radius);
+        int killed = 0;
+        Vector3 kpos = { 0 };
+        zombies_damage(i, dmg, z->pos, false, &killed, &kpos);
+    }
 }
 
 int zombies_raycast(Ray ray, float max_dist, ZombieHit *out, int max_out)

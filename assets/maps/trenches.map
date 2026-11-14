@@ -1,6 +1,7 @@
 # ============================================================================
 # Dead Arrival map: HOLLOW LINE
-# A great war trench network with two bunkers. Movement is tight.
+# A great war trench network with two deep bunkers. You can never leave
+# the line: there are no stairs up, the parapets are too tall to climb.
 # spawn_mode = drop  -> zombies drop in from the parapets above
 # ============================================================================
 name = Hollow Line
@@ -9,93 +10,105 @@ author = Faded Dream
 spawn_mode = drop
 ambient = 150 142 128
 sky = 24 25 27
-player_spawn = 0 -2.2 -7.8 270
+player_spawn = -15 -2.65 0 180
 
-# ---- trench floor slab (top at -2.4) ----
-box = 0 -2.9 0 28 0.5 18 floor_mud
+# ---- trench + bunker floor slab (top at -2.65) ----
+box = 0 -2.9 0 34 0.5 24 floor_mud
 
-# ---- outer berm ring (top at 0), west/east split around bunker recesses ----
-box = 0 -3 -11.5 28 3 5 trench_wall
-box = 0 -3 11.5 28 3 5 trench_wall
-box = -13 -3 -5.6 2 3 6.8 trench_wall
-box = -13 -3 5.6 2 3 6.8 trench_wall
-box = 13 -3 -5.6 2 3 6.8 trench_wall
-box = 13 -3 5.6 2 3 6.8 trench_wall
+# ---- berm fill: everything except the trench network (top at 0) ----
+# north / south parapet strips
+box = 0 -1.5 -9.25 34 3 5.5 trench_wall
+box = 0 -1.5 9.25 34 3 5.5 trench_wall
+# between the main trench and the north reserve trench (gaps = comm links)
+box = -14.5 -1.5 -6 5 3 1 trench_wall
+box = -9 -1.5 -5 6 3 3 trench_wall
+box = 0 -1.5 -5 6 3 3 trench_wall
+box = 9 -1.5 -5 6 3 3 trench_wall
+box = 14.5 -1.5 -6 5 3 1 trench_wall
+# between the main trench and the south reserve trench
+box = -14.5 -1.5 6 5 3 1 trench_wall
+box = -9 -1.5 5 6 3 3 trench_wall
+box = 0 -1.5 5 6 3 3 trench_wall
+box = 9 -1.5 5 6 3 3 trench_wall
+box = 14.5 -1.5 6 5 3 1 trench_wall
+# trench end walls (also the bunker back walls)
+box = -17.25 -1.5 0 0.5 3 24 trench_wall
+box = 17.25 -1.5 0 0.5 3 24 trench_wall
 
-# ---- central island (top at 0): the no man's land you can climb onto ----
-box = 0 -3 0 19.2 3 13.2 trench_wall
+# ---- field boundary walls on top of the parapets ----
+box = 0 0 -12.3 35 4 0.4 trench_wall
+box = 0 0 12.3 35 4 0.4 trench_wall
+box = -17.5 0 0 0.4 4 25 trench_wall
+box = 17.5 0 0 0.4 4 25 trench_wall
 
-# ---- west bunker (dug into the berm): back wall + roof ----
-box = -14.05 -2.9 0 0.7 3 4.6 trench_wall
-box = -13 -0.4 0 2.6 0.4 4.6 trench_wall
-box = -13.5 -2.4 1.5 0.7 0.9 0.7 crate_wood
-box = -13.5 -2.4 -1.5 0.7 0.9 0.7 crate_wood
+# ---- sandbags along the parapet rims (decoration, unreachable) ----
+box = -5 0 -6.7 4 0.5 0.6 sandbag
+box = 5 0 -6.7 4 0.5 0.6 sandbag
+box = -5 0 6.7 4 0.5 0.6 sandbag
+box = 5 0 6.7 4 0.5 0.6 sandbag
+box = -9.7 0 -8.25 0.6 0.5 3 sandbag
+box = 9.7 0 -8.25 0.6 0.5 3 sandbag
+box = -9.7 0 8.25 0.6 0.5 3 sandbag
+box = 9.7 0 8.25 0.6 0.5 3 sandbag
 
-# ---- east bunker ----
-box = 14.05 -2.9 0 0.7 3 4.6 trench_wall
-box = 13 -0.4 0 2.6 0.4 4.6 trench_wall
-box = 13.5 -2.4 1.5 0.7 0.9 0.7 crate_wood
-box = 13.5 -2.4 -1.5 0.7 0.9 0.7 crate_wood
+# ---- WEST BUNKER: two rooms dug into the berm, with a dividing wall ----
+box = -14.5 -0.45 0 4 0.4 10.5 trench_wall
+box = -14.5 -1.65 3.25 0.5 2 3.5 trench_wall
+box = -14.5 -1.65 -3.25 0.5 2 3.5 trench_wall
+box = -15.8 -2.65 4.6 0.7 0.9 0.7 crate_wood
+box = -15.8 -2.65 -4.6 0.7 0.9 0.7 crate_wood
 
-# ---- field boundary walls (on top of the berms) ----
-box = 0 0 -14.3 30 4 0.4 trench_wall
-box = 0 0 14.3 30 4 0.4 trench_wall
-box = -14.3 0 0 0.4 4 30 trench_wall
-box = 14.3 0 0 0.4 4 30 trench_wall
+# ---- EAST BUNKER: same layout ----
+box = 14.5 -0.45 0 4 0.4 10.5 trench_wall
+box = 14.5 -1.65 3.25 0.5 2 3.5 trench_wall
+box = 14.5 -1.65 -3.25 0.5 2 3.5 trench_wall
+box = 15.8 -2.65 4.6 0.7 0.9 0.7 crate_wood
+box = 15.8 -2.65 -4.6 0.7 0.9 0.7 crate_wood
 
-# ---- sandbags on the island rim ----
-box = -6 0 -6.35 3 0.5 0.6 sandbag
-box = 6 0 -6.35 3 0.5 0.6 sandbag
-box = -6 0 6.35 3 0.5 0.6 sandbag
-box = 6 0 6.35 3 0.5 0.6 sandbag
-box = -9.35 0 -3 0.6 0.5 3 sandbag
-box = -9.35 0 3 0.6 0.5 3 sandbag
-box = 9.35 0 -3 0.6 0.5 3 sandbag
-box = 9.35 0 3 0.6 0.5 3 sandbag
-
-# ---- duckboards along the trench floor ----
-box = 0 -2.4 -7.8 20 0.12 1 duckboard
-box = 0 -2.4 7.8 20 0.12 1 duckboard
-box = -10.8 -2.4 0 1 0.12 13.2 duckboard
-box = 10.8 -2.4 0 1 0.12 13.2 duckboard
-
-# ---- stairs: trench north -> island (6 steps, 0.4m each) ----
-box = 0 -2.4 -9.35 2.4 0.4 0.5 duckboard
-box = 0 -2 -8.85 2.4 0.4 0.5 duckboard
-box = 0 -1.6 -8.35 2.4 0.4 0.5 duckboard
-box = 0 -1.2 -7.85 2.4 0.4 0.5 duckboard
-box = 0 -0.8 -7.35 2.4 0.4 0.5 duckboard
-box = 0 -0.4 -6.85 2.4 0.4 0.5 duckboard
-
-# ---- stairs: island -> trench south ----
-box = 0 -2.4 9.35 2.4 0.4 0.5 duckboard
-box = 0 -2 8.85 2.4 0.4 0.5 duckboard
-box = 0 -1.6 8.35 2.4 0.4 0.5 duckboard
-box = 0 -1.2 7.85 2.4 0.4 0.5 duckboard
-box = 0 -0.8 7.35 2.4 0.4 0.5 duckboard
-box = 0 -0.4 6.85 2.4 0.4 0.5 duckboard
+# ---- duckboards along the trench floors ----
+box = 0 -2.4 0 30 0.12 1.2 duckboard
+box = 0 -2.4 -8.25 17 0.12 1 duckboard
+box = 0 -2.4 8.25 17 0.12 1 duckboard
+box = -4.5 -2.4 -5 1 0.12 3 duckboard
+box = 4.5 -2.4 -5 1 0.12 3 duckboard
+box = -4.5 -2.4 5 1 0.12 3 duckboard
+box = 4.5 -2.4 5 1 0.12 3 duckboard
 
 # ---- drop points: zombies fall in from the parapets ----
-drop = 0 0 -11.5
-drop = -6 0 -11.5
-drop = 6 0 -11.5
-drop = 0 0 11.5
-drop = -6 0 11.5
-drop = 6 0 11.5
-drop = -13 0 -5.5
-drop = -13 0 5.5
-drop = 13 0 -5.5
-drop = 13 0 5.5
+drop = -6 0 -7
+drop = 0 0 -7
+drop = 6 0 -7
+drop = -6 0 7
+drop = 0 0 7
+drop = 6 0 7
+drop = -8 0 -5
+drop = 8 0 -5
+drop = -8 0 5
+drop = 8 0 5
+drop = -10 0 0
+drop = 10 0 0
+drop = 0 0 -11
+drop = 0 0 11
 
-# ---- wall buys (chalk marks on the trench walls) ----
-wallbuy = 3 -1.2 -6.55 1 kar98k 200
+# ---- wall buys (spread through the network) ----
+wallbuy = -16.95 -1.2 0 2 kar98k 200
+wallbuy = 16.95 -1.2 0 3 mosin 250
+wallbuy = 0 -1.2 -3.45 0 grenades 450
 wallbuy = -2.5 -1.2 6.55 0 mp40 1200
 wallbuy = 2.5 -1.2 6.55 0 stg44 1800
-wallbuy = 9.55 -1.2 3 2 trench_gun 1500
-wallbuy = -9.55 -1.2 -3 3 thompson 1400
-wallbuy = -13.65 -1.2 0 2 mosin 250
-wallbuy = 13.65 -1.2 0 3 double_barrel 1200
+wallbuy = 2.5 -1.2 -6.55 1 trench_gun 1500
+wallbuy = -2.5 -1.2 -6.55 1 thompson 1400
+wallbuy = 9.5 -1.2 3.45 1 double_barrel 1200
 
-# ---- mystery boxes inside the bunkers ----
-mysterybox = -13 -2.30 0
-mysterybox = 13 -2.30 0
+# ---- perk machines ----
+perk = -15.8 -2.65 -2.5 quick
+perk = 15.8 -2.65 2.5 jugg
+perk = 0 -2.65 9.2 speed
+perk = 0 -2.65 -9.2 double
+
+# ---- Pack-a-Punch (east bunker, far room) ----
+pap = 15.8 -2.65 -2.5
+
+# ---- mystery boxes (one per bunker) ----
+mysterybox = -15.8 -2.30 2.5
+mysterybox = 15.8 -2.30 -4.8

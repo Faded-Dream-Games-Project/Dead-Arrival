@@ -20,11 +20,16 @@ and survive as many rounds as the horde allows.
 
 - **Round-based survival** — endless rounds, growing hordes, walkers turn into runners
 - **3 maps**, all plain data files (drop a new `.map` in `assets/maps` and it appears in the menu):
-  - **Theater of the Damned** — a ruined playhouse; zombies tear through boarded windows and the backstage door
+  - **Theater of the Damned** — a ruined playhouse. You start backstage and buy your way through doors into the auditorium, lobby and dressing rooms; zombies come through the boarded windows of whichever room you're in
   - **St. Aldric's Rest** — a graveyard with a church in the middle; zombies rise straight out of the grave mounds
-  - **Hollow Line** — a tight great-war trench network with two bunkers; zombies drop in from the parapets above
+  - **Hollow Line** — an open great-war trench network with two deep bunkers. There is no way up to the parapets: the horde drops in from above
 - **23 weapons** defined in `assets/weapons.cfg` — pistols, SMGs, rifles, shotguns, LMGs and
   box-only specials; only some are wall-buyable
+- **Perks, Pack-a-Punch, grenades** — Quick Revive / Double Tap / Speed Cola / Juggernog
+  machines, a 5000-point Pack-a-Punch that upgrades your gun (2.5x damage, +50% mag),
+  throwable grenades (G) with wall-buy refills, and a knife (V) with a proper viewmodel
+- **Buyable doors and rooms** — maps can gate areas behind doors; zombie spawning follows
+  the room you're in
 - **Classic economy** — 10 points per hit, 50 per kill, 10 per board repaired;
   wall buys and the **950-point mystery box**
 - **All content is data-driven** — maps, weapon stats, textures and sounds load from `assets/`
@@ -39,7 +44,6 @@ and survive as many rounds as the horde allows.
 | Multiplayer | **COMING SOON** |
 | Custom skins | **COMING SOON** |
 | Custom maps (in-game editor) | **PLANNED** — the data format already works, see `docs/MAP_FORMAT.md` |
-| Perk machines, pack-a-punch, grenades | PLANNED |
 
 ## Controls
 
@@ -50,8 +54,9 @@ and survive as many rounds as the horde allows.
 | Space | Jump |
 | R | Reload |
 | 1 / 2 / Q | Switch weapon |
-| F | Interact (buy, mystery box, rebuild boards) |
+| F | Interact (buy, mystery box, doors, perks, Pack-a-Punch, rebuild boards) |
 | V | Knife |
+| G | Throw grenade |
 | Esc | Pause |
 
 ## Building

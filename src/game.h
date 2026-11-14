@@ -37,6 +37,10 @@ bool cfg_bool(const char *v);
 
 #define MAX_MAP_BOXES        512
 #define MAX_BARRIERS         32
+#define MAX_ROOMS            16
+#define MAX_DOORS            8
+#define MAX_PERKS            8
+#define MAX_GRENADES         8
 #define MAX_SPAWN_POINTS     64
 #define MAX_WALLBUYS         32
 #define MAX_MYSTERY_BOXES    4
@@ -73,7 +77,32 @@ bool cfg_bool(const char *v);
 #define BARRIER_REPAIR_PTS   10
 
 #define MYSTERY_BOX_COST     950       // classic price
-#define MYSTERY_ROLL_TIME    3.2f
+#define MYSTERY_ROLL_TIME    4.0f
+
+// ---- Pack-a-Punch ----
+#define PAP_COST             5000
+#define PAP_DAMAGE_MULT      2.5f
+#define PAP_MAG_BONUS_DIV    2         // +50% mag size (mag + mag/2)
+
+// ---- perks ----
+#define PERK_COST_QUICK      500
+#define PERK_COST_DOUBLE     2000
+#define PERK_COST_SPEED      3000
+#define PERK_COST_JUGG       2500
+#define PERK_JUGG_BONUS      100       // extra max HP
+#define PERK_REGEN_DELAY_MULT 0.5f     // quick revive: regen starts twice as fast
+#define PERK_REGEN_RATE_MULT  2.0f
+#define PERK_DOUBLE_RPM_MULT  1.3f     // double tap: +30% fire rate
+#define PERK_SPEED_RELOAD_MULT 0.55f   // speed cola: ~half reload time
+
+// ---- grenades ----
+#define GRENADE_START        2
+#define GRENADE_MAX          4
+#define GRENADE_COST         450       // wall-buy refill
+#define GRENADE_FUSE         2.2f
+#define GRENADE_RADIUS       5.0f
+#define GRENADE_DAMAGE       1200.0f   // at the center, falls off to the edge
+#define GRENADE_THROW_CD     0.6f
 #define MYSTERY_OFFER_TIME   10.0f
 
 #define PTS_PER_HIT          10
@@ -182,6 +211,7 @@ typedef struct WeaponSlot {
     float cooldown;         // time until next shot
     float reload_t;         // >0 while reloading
     float switch_t;         // raise/lower animation timer
+    bool  upgraded;         // Pack-a-Punch
 } WeaponSlot;
 
 int  weapons_load(const char *path);                  // returns count
@@ -213,6 +243,7 @@ typedef struct Barrier {
     float   tear_accum;    // accumulated tear progress
     float   repair_cd;
     int     used;          // spawn bookkeeping
+    int     room;          // room index this barrier belongs to (-1 = any)
 } Barrier;
 
 typedef struct SpawnPoint { Vector3 pos; int used; } SpawnPoint;
@@ -225,6 +256,43 @@ typedef struct WallBuy {
 } WallBuy;
 
 typedef struct MysteryBoxLoc { Vector3 pos; } MysteryBoxLoc;
+
+// named rectangular area of the map (rooms drive zombie spawning: barriers
+// in the room the player currently stands in are preferred spawn points)
+typedef struct Room {
+    char    name[24];
+    Vector3 min, max;
+    bool    visited;          // set once the player has been inside
+} Room;
+
+// buyable door: blocks the opening until bought with F
+typedef struct Door {
+    Vector3 pos;             // center of the opening
+    int     face;            // 0=+Z 1=-Z 2=+X 3=-X (outward normal)
+    float   width;           // opening width along the wall
+    int     cost;
+    bool    open;
+} Door;
+
+// perk vending machines
+typedef enum {
+    PERK_QUICK = 0,          // faster health regen
+    PERK_DOUBLE,             // faster fire rate
+    PERK_SPEED,              // faster reloads
+    PERK_JUGG,               // more health
+    PERK_TYPE_COUNT
+} PerkType;
+
+typedef struct PerkMachine { Vector3 pos; PerkType type; } PerkMachine;
+
+typedef struct Grenade {
+    bool    active;
+    Vector3 pos, vel;
+    float   fuse;            // seconds until detonation
+    bool    on_ground;
+} Grenade;
+
+#define WALLBUY_GRENADES   (-2)  // special wallbuy: grenade refill
 
 typedef struct GameMap {
     char  file[MAX_NAME];
@@ -242,6 +310,11 @@ typedef struct GameMap {
     SpawnPoint spawns[MAX_SPAWN_POINTS]; int spawn_count;
     WallBuy wallbuys[MAX_WALLBUYS];     int wallbuy_count;
     MysteryBoxLoc mboxes[MAX_MYSTERY_BOXES]; int mbox_count;
+    Room rooms[MAX_ROOMS];              int room_count;
+    Door doors[MAX_DOORS];              int door_count;
+    PerkMachine perks[MAX_PERKS];       int perk_count;
+    bool has_pap;                       // Pack-a-Punch machine present
+    Vector3 pap_pos;
 
     // runtime mesh cache (one mesh per box, tiled UVs)
     Mesh  meshes[MAX_MAP_BOXES];
@@ -253,6 +326,7 @@ void map_unload(GameMap *m);
 void map_build_meshes(GameMap *m);
 int  map_list_dir(char out[][MAX_NAME], int max);     // scans assets/maps/*.map
 void map_peek(const char *file, char *name, int name_len, char *desc, int desc_len);
+int  map_room_of(const GameMap *m, Vector3 p);        // room index or -1
 
 // collision helpers
 bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
@@ -260,6 +334,7 @@ bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
 RayCollision map_raycast(GameMap *m, Ray ray, float max_dist);
 Vector3 map_box_center(const MapBox *b);
 BoundingBox barrier_bb(const Barrier *b);
+BoundingBox door_bb(const Door *d);
 Vector3 barrier_outward(const Barrier *b);
 
 // ---------------------------------------------------------------------------
@@ -351,6 +426,9 @@ typedef struct Player {
     float   interact_cd;
     bool    ads;           // aiming down sights
     float   dead_t;
+    bool    perks[PERK_TYPE_COUNT];
+    int     grenades;      // throwable grenades left
+    float   grenade_cd;
 } Player;
 
 void player_reset(Vector3 spawn, float yaw);
@@ -366,6 +444,18 @@ void player_switch_slot(int slot);
 void player_knife(void);
 const char *player_interact_prompt(void);       // "" if nothing in range
 void player_try_interact(void);
+void player_throw_grenade(void);
+void player_update_grenades(float dt);
+void player_draw_grenades(void);
+void player_reset_grenades(void);
+int  player_max_hp(void);
+int  weapon_mag_size(const WeaponSlot *s);
+float weapon_damage(const WeaponSlot *s);
+float weapon_reload_time(const WeaponSlot *s);
+float weapon_cooldown_time(const WeaponSlot *s);
+const char *weapon_display_name(const WeaponSlot *s, char *buf, int buflen);
+void game_explode_at(Vector3 pos);              // grenade detonation (AoE)
+void zombies_apply_explosion(Vector3 pos, float radius, float max_damage);
 
 // ---------------------------------------------------------------------------
 // Particles

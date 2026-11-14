@@ -208,6 +208,66 @@ def tex_zombie_skin(size):
                     px[x, y] = jitter((96, 60, 55), 16)
     return img
 
+def tex_perk_machine(size, panel, glow, letter, seed):
+    """Vending machine front: dark cabinet, colored panel, glowing icon."""
+    img = blend(noise_image(size, (52, 50, 54), 8, seed),
+                value_noise(size, 6, seed + 1), 0.4)
+    d = ImageDraw.Draw(img)
+    # cabinet frame
+    d.rectangle([8, 8, size - 9, size - 9], outline=(28, 26, 30), width=6)
+    # colored front panel
+    d.rectangle([24, 24, size - 25, size // 2 + 20], fill=panel)
+    for y in range(24, size // 2 + 20, 6):     # panel sheen lines
+        d.line([(26, y), (size - 26, y)], fill=glow, width=1)
+    # glowing icon (letter + halo) on the panel
+    cx, cy = size // 2, size // 4 + 12
+    d.ellipse([cx - 52, cy - 52, cx + 52, cy + 52], fill=(20, 18, 22))
+    d.ellipse([cx - 44, cy - 44, cx + 44, cy + 44], outline=glow, width=4)
+    d.text((cx - 11, cy - 22), letter, fill=glow)
+    # dispense slot + base
+    d.rectangle([size // 3, size - 58, 2 * size // 3, size - 30], fill=(18, 16, 20))
+    d.rectangle([size // 3, size - 58, 2 * size // 3, size - 30], outline=glow, width=2)
+    return img
+
+def tex_pap(size):
+    """Pack-a-Punch: dark iron machine with a hot orange core."""
+    img = blend(noise_image(size, (44, 40, 44), 10, 91),
+                value_noise(size, 7, 92), 0.5)
+    d = ImageDraw.Draw(img)
+    # iron plates + rivets
+    d.rectangle([6, 6, size - 7, size - 7], outline=(24, 22, 26), width=8)
+    for x in (6, size // 2, size - 7):
+        d.line([(x, 6), (x, size - 7)], fill=(58, 54, 58), width=3)
+    r = random.Random(93)
+    for _ in range(24):
+        rx, ry = r.randint(14, size - 15), r.randint(14, size - 15)
+        d.ellipse([rx - 3, ry - 3, rx + 3, ry + 3], fill=(70, 66, 70))
+    # molten core window
+    d.rectangle([size // 3, size // 3, 2 * size // 3, 2 * size // 3], fill=(30, 14, 6))
+    hot = (255, 150, 40)
+    d.rectangle([size // 3 + 8, size // 3 + 8, 2 * size // 3 - 8, 2 * size // 3 - 8],
+                outline=hot, width=5)
+    for i in range(4):   # heat glow bars
+        yy = size // 3 + 18 + i * 16
+        d.line([(size // 3 + 14, yy), (2 * size // 3 - 14, yy)],
+               fill=(255, 190, 90) if i % 2 else hot, width=5)
+    d.text((size // 2 - 11, 3 * size // 4), "P", fill=hot)
+    return img
+
+def tex_door(size):
+    """Buyable door: heavy planks with iron bands."""
+    img = tex_wood(size, (96, 72, 48), 128, (48, 34, 22), vertical=True, seed=94)
+    d = ImageDraw.Draw(img)
+    iron = (58, 56, 60)
+    for yy in (size // 4, 3 * size // 4):     # iron bands
+        d.rectangle([0, yy - 9, size - 1, yy + 9], fill=iron)
+        d.rectangle([0, yy - 9, size - 1, yy + 9], outline=(30, 28, 32), width=3)
+    for x in range(16, size, 32):             # bolt heads
+        for yy in (size // 4, 3 * size // 4):
+            d.ellipse([x - 3, yy - 3, x + 3, yy + 3], fill=(96, 92, 96))
+    d.ellipse([size - 40, size // 2 - 6, size - 28, size // 2 + 6], fill=(150, 120, 60))
+    return img
+
 def gen_textures():
     os.makedirs(TEX_DIR, exist_ok=True)
     S = 256
@@ -252,6 +312,14 @@ def gen_textures():
                                 value_noise(S, 9, 68), 0.65)
     out["wallbuy_chalk"]= tex_chalk_gun(S)
     out["mystery_box"]  = tex_mystery_box(S)
+
+    # perk machines (panel, glow, letter)
+    out["perk_quick"]  = tex_perk_machine(S, (36, 70, 92),  (120, 220, 255), "Q", 71)
+    out["perk_double"] = tex_perk_machine(S, (110, 62, 22), (255, 170, 70),  "D", 72)
+    out["perk_speed"]  = tex_perk_machine(S, (34, 88, 44),  (130, 235, 140), "S", 73)
+    out["perk_jugg"]   = tex_perk_machine(S, (104, 30, 30), (255, 90, 80),   "J", 74)
+    out["pap"]         = tex_pap(S)
+    out["door"]        = tex_door(S)
 
     for name, img in out.items():
         img.save(os.path.join(TEX_DIR, name + ".png"))
@@ -335,6 +403,50 @@ def snd_shots():
              env_exp(i / SR, 0.3) for i in range(int(0.3 * SR))] +
             [0.05 * s for s in rnoise(0.1, 108)]),
     }
+
+def snd_features():
+    """Perks / Pack-a-Punch / doors / grenades / knife sounds."""
+    out = {}
+    # perk jingle: bright 3-note ding
+    jingle = []
+    for i, f in enumerate([523, 784, 1047]):
+        jingle = mix_at(jingle, pluck(f, 0.35, 0.6, 0.12), i * 0.11)
+    out["perk_buy"] = normalize(jingle)
+    # pack-a-punch: heavy industrial arpeggio
+    pap = []
+    for i, f in enumerate([131, 196, 262, 392]):
+        pap = mix_at(pap, pluck(f, 0.5, 0.8, 0.2), i * 0.14)
+    pap = mix_at(pap, [s * 0.4 for s in lowpass(rnoise(0.5, 301), 0.15)], 0.0)
+    out["pap_buy"] = normalize(pap)
+    # door opening: creak sweep + thud
+    n = int(0.7 * SR)
+    creak = [0.35 * math.sin(2 * math.pi * (170 - 70 * i / n) * i / SR)
+             * (0.6 + 0.4 * math.sin(2 * math.pi * 26 * i / SR)) * env_exp(i / SR, 0.7)
+             for i in range(n)]
+    door = mix_at([s * 0.5 for s in creak], pluck(65, 0.25, 0.9, 0.05), 0.5)
+    door = mix_at(door, [s * 0.6 for s in lowpass(rnoise(0.3, 302), 0.2)], 0.55)
+    out["door_open"] = normalize(door)
+    # grenade throw: short whoosh
+    out["grenade_throw"] = normalize(
+        [s * env_exp(i / SR, 0.25) for i, s in enumerate(lowpass(rnoise(0.25, 303), 0.45))])
+    # grenade bounce: small thud
+    out["grenade_bounce"] = normalize(
+        [s * env_exp(i / SR, 0.07) for i, s in enumerate(lowpass(rnoise(0.07, 304), 0.2))] +
+        pluck(130, 0.08, 0.6, 0.02))
+    # explosion: big filtered boom + sub thump + crackle
+    n = int(1.4 * SR)
+    body = [s * env_exp(i / SR, 1.4)
+            for i, s in enumerate(lowpass(rnoise(1.4, 305), 0.12))]
+    sub = [0.8 * math.sin(2 * math.pi * 48 * i / SR) * env_exp(i / SR, 0.7)
+           for i in range(n)]
+    crackle = [s * env_exp(i / SR, 0.35) for i, s in enumerate(rnoise(0.35, 306))]
+    out["explosion"] = normalize(mix_at(mix_at(body, sub, 0.0),
+                                        [s * 0.7 for s in crackle], 0.03))
+    # knife hit: wet slice + thump
+    out["knife_hit"] = normalize(
+        [0.8 * s * env_exp(i / SR, 0.12) for i, s in enumerate(lowpass(rnoise(0.12, 307), 0.3))] +
+        pluck(190, 0.1, 0.7, 0.03))
+    return out
 
 def snd_ui_and_world():
     out = {}
@@ -461,6 +573,7 @@ def gen_sounds():
     all_sounds.update(snd_shots())
     all_sounds.update(snd_ui_and_world())
     all_sounds.update(snd_player_zombie())
+    all_sounds.update(snd_features())
     all_sounds["menu_theme"] = snd_menu_theme()
 
     for name, samples in all_sounds.items():
@@ -486,14 +599,17 @@ def main():
              "roof_stone", "floor_stone", "floor_grass", "floor_mud", "trench_wall",
              "grave_dirt", "sandbag", "curtain_red", "seat_red", "bark_dark",
              "leaves_dark", "headstone", "zombie_skin", "zombie_cloth",
-             "wallbuy_chalk", "mystery_box"]
+             "wallbuy_chalk", "mystery_box", "perk_quick", "perk_double",
+             "perk_speed", "perk_jugg", "pap", "door"]
     snds = ["shot_pistol", "shot_smg", "shot_rifle", "shot_ar", "shot_shotgun",
             "shot_sniper", "shot_lmg", "shot_special", "reload", "reload_end",
-            "dry_fire", "weapon_switch", "knife", "hitmarker", "headshot", "deny",
-            "buy", "box_jingle", "box_open", "board_break", "board_repair",
-            "round_start", "round_end", "player_hurt", "player_death",
-            "zombie_groan", "zombie_attack", "zombie_hit", "zombie_death",
-            "zombie_rise", "zombie_land", "menu_theme"]
+            "dry_fire", "weapon_switch", "knife", "knife_hit", "hitmarker",
+            "headshot", "deny", "buy", "box_jingle", "box_open", "board_break",
+            "board_repair", "round_start", "round_end", "player_hurt",
+            "player_death", "zombie_groan", "zombie_attack", "zombie_hit",
+            "zombie_death", "zombie_rise", "zombie_land", "perk_buy", "pap_buy",
+            "door_open", "grenade_throw", "grenade_bounce", "explosion",
+            "menu_theme"]
 
     if args.check and not args.force:
         missing_t = [t for t in texes

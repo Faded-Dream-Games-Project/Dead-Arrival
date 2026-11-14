@@ -110,5 +110,17 @@ wallbuy = 0 1.6 8.35 1 double_barrel 1200
 wallbuy = 0 1.6 -21.9 0 python 1000
 wallbuy = 21.9 1.6 -6 3 stg44 1800
 
+# ---- perk machines ----
+perk = -3.2 0 5.2 quick
+perk = 4 0 -11 jugg
+perk = -14 0 10 speed
+perk = 14 0 2 double
+
+# ---- Pack-a-Punch (in the church, by the altar) ----
+pap = 3.2 0 5.2
+
+# ---- grenade refill (church south wall) ----
+wallbuy = -2.5 1.6 8.35 1 grenades 450
+
 # ---- mystery box at the altar ----
 mysterybox = 0 0.35 4.8

@@ -195,6 +195,8 @@ bool map_load(GameMap *m, const char *path)
                 int price = 0;
                 sscanf(tok, "%63s %d", wid, &price);
                 w->weapon = weapons_find(wid);
+                if (w->weapon < 0 && strcmp(wid, "grenades") == 0)
+                    w->weapon = WALLBUY_GRENADES;   // grenade refill station
                 w->price = (price > 0) ? price : 0;
                 if (w->weapon < 0)
                 {
@@ -213,17 +215,82 @@ bool map_load(GameMap *m, const char *path)
         {
             m->mboxes[m->mbox_count++].pos = (Vector3){ fv[0], fv[1], fv[2] };
         }
+        else if (strcmp(key, "room") == 0)
+        {
+            // room = name x1 y1 z1 x2 y2 z2
+            if (m->room_count < MAX_ROOMS)
+            {
+                Room *r = &m->rooms[m->room_count];
+                char *sp = strchr(value, ' ');
+                int nlen = sp ? (int)(sp - value) : (int)strlen(value);
+                if (nlen >= (int)sizeof(r->name)) nlen = (int)sizeof(r->name) - 1;
+                memcpy(r->name, value, nlen);
+                r->name[nlen] = '\0';
+                if (sp && cfg_floats(sp + 1, fv, 6) == 6)
+                {
+                    r->min = (Vector3){ fminf(fv[0], fv[3]), fminf(fv[1], fv[4]), fminf(fv[2], fv[5]) };
+                    r->max = (Vector3){ fmaxf(fv[0], fv[3]), fmaxf(fv[1], fv[4]), fmaxf(fv[2], fv[5]) };
+                    r->visited = false;
+                    m->room_count++;
+                }
+                else TraceLog(LOG_WARNING, "MAP %s:%d: bad room line", m->file, lineno);
+            }
+        }
+        else if (strcmp(key, "door") == 0)
+        {
+            // door = x y z face width cost
+            if (cfg_floats(value, fv, 6) == 6 && m->door_count < MAX_DOORS)
+            {
+                Door *d = &m->doors[m->door_count++];
+                d->pos = (Vector3){ fv[0], fv[1], fv[2] };
+                d->face = (int)fv[3];
+                d->width = fv[4];
+                d->cost = (int)fv[5];
+                d->open = false;
+            }
+            else TraceLog(LOG_WARNING, "MAP %s:%d: bad door line", m->file, lineno);
+        }
+        else if (strcmp(key, "perk") == 0)
+        {
+            // perk = x y z type   (quick | double | speed | jugg)
+            if (cfg_floats(value, fv, 3) == 3 && m->perk_count < MAX_PERKS)
+            {
+                PerkType t = PERK_QUICK;
+                const char *sp = strrchr(value, ' ');
+                const char *type = sp ? sp + 1 : value;
+                if      (strcmp(type, "double") == 0) t = PERK_DOUBLE;
+                else if (strcmp(type, "speed")  == 0) t = PERK_SPEED;
+                else if (strcmp(type, "jugg")   == 0) t = PERK_JUGG;
+                else if (strcmp(type, "quick")  != 0)
+                    TraceLog(LOG_WARNING, "MAP %s:%d: unknown perk type '%s'", m->file, lineno, type);
+                PerkMachine *p = &m->perks[m->perk_count++];
+                p->pos = (Vector3){ fv[0], fv[1], fv[2] };
+                p->type = t;
+            }
+        }
+        else if (strcmp(key, "pap") == 0 && cfg_floats(value, fv, 3) == 3)
+        {
+            // pap = x y z   (Pack-a-Punch machine, one per map)
+            m->has_pap = true;
+            m->pap_pos = (Vector3){ fv[0], fv[1], fv[2] };
+        }
     }
     fclose(f);
 
+    // assign every barrier to the room that contains it (for room-based
+    // zombie spawning); barriers outside all rooms stay "any room" (-1)
+    for (int i = 0; i < m->barrier_count; i++)
+        m->barriers[i].room = map_room_of(m, m->barriers[i].pos);
+
     if (!m->name[0]) str_copy(m->name, sizeof(m->name), m->file);
 
-    TraceLog(LOG_INFO, "MAP: '%s' (%s) by %s - mode=%s boxes=%d barriers=%d spawns=%d buys=%d mboxes=%d",
+    TraceLog(LOG_INFO, "MAP: '%s' (%s) by %s - mode=%s boxes=%d barriers=%d spawns=%d buys=%d mboxes=%d rooms=%d doors=%d perks=%d pap=%d",
              m->name, m->file, m->author[0] ? m->author : "unknown",
              m->spawn_mode == SPAWN_BARRIERS ? "barriers" :
              m->spawn_mode == SPAWN_GRAVES ? "graves" : "drop",
              m->box_count, m->barrier_count, m->spawn_count,
-             m->wallbuy_count, m->mbox_count);
+             m->wallbuy_count, m->mbox_count, m->room_count, m->door_count,
+             m->perk_count, m->has_pap ? 1 : 0);
 
     if (m->spawn_mode == SPAWN_BARRIERS && m->barrier_count == 0)
     {
@@ -504,4 +571,30 @@ Vector3 barrier_outward(const Barrier *b)
         case 2: return (Vector3){  1, 0, 0 };
         default:return (Vector3){ -1, 0, 0 };
     }
+}
+
+int map_room_of(const GameMap *m, Vector3 p)
+{
+    for (int i = 0; i < m->room_count; i++)
+    {
+        const Room *r = &m->rooms[i];
+        if (p.x >= r->min.x && p.x <= r->max.x &&
+            p.y >= r->min.y && p.y <= r->max.y &&
+            p.z >= r->min.z && p.z <= r->max.z)
+            return i;
+    }
+    return -1;
+}
+
+BoundingBox door_bb(const Door *d)
+{
+    // like barrier_bb: opening width along the wall, ~2.3m tall
+    if (d->face == 0 || d->face == 1)       // wall runs along X
+        return (BoundingBox){
+            (Vector3){ d->pos.x - d->width * 0.5f, d->pos.y, d->pos.z - 0.25f },
+            (Vector3){ d->pos.x + d->width * 0.5f, d->pos.y + 2.3f, d->pos.z + 0.25f } };
+    else                                    // wall runs along Z
+        return (BoundingBox){
+            (Vector3){ d->pos.x - 0.25f, d->pos.y, d->pos.z - d->width * 0.5f },
+            (Vector3){ d->pos.x + 0.25f, d->pos.y + 2.3f, d->pos.z + d->width * 0.5f } };
 }
