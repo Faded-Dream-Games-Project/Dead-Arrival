@@ -11,6 +11,7 @@
 //  Collision: axis-separated AABB vs box with step-up.
 // ============================================================================
 #include "game.h"
+#include "json.h"
 
 // ============================================================================
 // AABB utilities
@@ -65,9 +66,7 @@ float RngRange(float a, float b) { return a + (b-a) * (RngNext() & 0xFFFFFF) / 1
 int RngInt(int n) { return n > 0 ? (int)(RngNext() % (uint32_t)n) : 0; }
 
 // ============================================================================
-// Map building helpers
-// ============================================================================
-static int BCount(MapDef *m) { return m->boxCount; }
+// small static helpers shared by the fallback arena builder
 static void B(MapDef *m, float x0,float y0,float z0, float x1,float y1,float z1, int tex) {
     if (m->boxCount >= MAX_BOXES) return;
     if (x1 < x0) { float t=x0; x0=x1; x1=t; }
@@ -76,16 +75,6 @@ static void B(MapDef *m, float x0,float y0,float z0, float x1,float y1,float z1,
     m->boxes[m->boxCount].aabb = AABB_Make(Vec3(x0,y0,z0), Vec3(x1,y1,z1));
     m->boxes[m->boxCount].tex = tex;
     m->boxes[m->boxCount].noCollide = false;
-    m->boxes[m->boxCount].doorId = 0;
-    m->boxCount++;
-}
-static void DC(MapDef *m, float x0,float y0,float z0, float x1,float y1,float z1, int tex) {
-    if (m->boxCount >= MAX_BOXES) return;
-    if (x1 < x0) { float t=x0; x0=x1; x1=t; }
-    if (z1 < z0) { float t=z0; z0=z1; z1=t; }
-    m->boxes[m->boxCount].aabb = AABB_Make(Vec3(x0,y0,z0), Vec3(x1,y1,z1));
-    m->boxes[m->boxCount].tex = tex;
-    m->boxes[m->boxCount].noCollide = true;
     m->boxes[m->boxCount].doorId = 0;
     m->boxCount++;
 }
@@ -118,811 +107,233 @@ static void WallBuyAdd(MapDef *m, int widx, float x, float y, float z, float yaw
     m->wallbuys[m->wallbuyCount].yaw = yaw;
     m->wallbuyCount++;
 }
-static void PerkAdd(MapDef *m, PerkType t, float x, float y, float z, float yaw) {
+static void PerkAddIdx(MapDef *m, int perkIdx, float x, float y, float z, float yaw) {
     if (m->perkCount >= MAX_PERKSTATIONS) return;
-    m->perks[m->perkCount].type = t;
+    m->perks[m->perkCount].perkType = perkIdx;
     m->perks[m->perkCount].pos = Vec3(x,y,z);
     m->perks[m->perkCount].yaw = yaw;
     m->perkCount++;
 }
-static void PadAdd(MapDef *m, float x, float y, float z, float ix, float iy, float iz) {
-    if (m->padCount >= MAX_JUMPPADS) return;
-    m->pads[m->padCount].pos = Vec3(x,y,z);
-    m->pads[m->padCount].radius = 1.3f;
-    m->pads[m->padCount].impulse = Vec3(ix,iy,iz);
-    m->padCount++;
+static void WallX(MapDef *m, float x0, float x1, float z, float h, float t, int tex) {
+    B(m, x0, 0, z-t/2, x1, h, z+t/2, tex);
 }
-static void ZipAdd(MapDef *m, Vector3 a, Vector3 b) {
-    if (m->ziplineCount >= MAX_ZIPLINES) return;
-    m->ziplines[m->ziplineCount].a = a;
-    m->ziplines[m->ziplineCount].b = b;
-    m->ziplineCount++;
+static void WallZ(MapDef *m, float z0, float z1, float x, float h, float t, int tex) {
+    B(m, x-t/2, 0, z0, x+t/2, h, z1, tex);
 }
-static void KillAdd(MapDef *m, float x0,float z0, float x1,float z1, float yTop) {
-    if (m->killzoneCount >= MAX_KILLZONES) return;
-    m->killzones[m->killzoneCount] = AABB_Make(Vec3(x0,-999,z0), Vec3(x1,yTop,z1));
-    m->killzoneCount++;
+typedef struct TexName { const char *name; } TexName;
+static TexName TEX_NAMES[] = {
+    { "brick" }, { "wood" }, { "plank" },
+    { "stone" }, { "marble" }, { "velvet" },
+    { "curtain" }, { "concrete" }, { "metal" },
+    { "rust" }, { "sandbag" }, { "grass" },
+    { "dirt" }, { "grave" }, { "glass" },
+    { "roof" }, { "stucco" }, { "tile" },
+    { "asphalt" },
+};
+
+static int TexFromName(const char *s) {
+    if (!s) return TEX_CONCRETE;
+    for (int i = 0; i < (int)(sizeof TEX_NAMES / sizeof TEX_NAMES[0]); i++)
+        if (TEX_NAMES[i].name && !strcmp(TEX_NAMES[i].name, s)) return i;
+    return TEX_CONCRETE;
 }
 
-// Wall along X at fixed z, optional centered gap (doorway) with lintel at 2.4.
-static void WallX(MapDef *m, float x0, float x1, float z, float h, float t, int tex, float gapC, float gapH) {
-    if (gapH > 0) {
-        if (gapC-gapH > x0) B(m, x0, 0, z-t/2, gapC-gapH, h, z+t/2, tex);
-        if (x1 > gapC+gapH) B(m, gapC+gapH, 0, z-t/2, x1, h, z+t/2, tex);
-        if (h > 2.4f) B(m, gapC-gapH, 2.4f, z-t/2, gapC+gapH, h, z+t/2, tex);
-    } else B(m, x0, 0, z-t/2, x1, h, z+t/2, tex);
-}
-static void WallZ(MapDef *m, float z0, float z1, float x, float h, float t, int tex, float gapC, float gapH) {
-    if (gapH > 0) {
-        if (gapC-gapH > z0) B(m, x-t/2, 0, z0, x+t/2, h, gapC-gapH, tex);
-        if (z1 > gapC+gapH) B(m, x-t/2, 0, gapC+gapH, x+t/2, h, z1, tex);
-        if (h > 2.4f) B(m, x-t/2, 2.4f, gapC-gapH, x+t/2, h, gapC+gapH, tex);
-    } else B(m, x-t/2, 0, z0, x+t/2, h, z1, tex);
-}
+static void MapApplyJson(MapDef *m, JsonNode *j) {
+    m->name = strdup(JsonStr(j, "name", gMaps[m->mapIndex].name));
+    m->desc = strdup(JsonStr(j, "desc", gMaps[m->mapIndex].desc));
+    m->difficulty = CLAMP(JsonInt(j, "difficulty", gMaps[m->mapIndex].difficulty), 1, 5);
+    JsonVec3(j, "playerStart", &m->playerStart);
+    m->playerYaw = (float)JsonNum(j, "playerYaw", 0);
+    if (JsonVec3(j, "boxPos", &m->boxPos)) { }
+    JsonVec3(j, "powerPos", &m->powerPos);
+    JsonVec3(j, "papPos", &m->papPos);
+    m->powerAtStart = JsonBool(j, "powerAtStart", false);
+    JsonColor(j, "skyTop", &m->skyTop);
+    JsonColor(j, "skyHorizon", &m->skyHorizon);
+    JsonColor(j, "fogColor", &m->fogColor);
+    m->fogDensity = (float)JsonNum(j, "fogDensity", 0.012f);
+    JsonVec3(j, "sunDir", &m->sunDir);
+    m->sunDir = Vec3Norm(m->sunDir);
+    JsonColor(j, "sunColor", &m->sunColor);
+    JsonColor(j, "ambient", &m->ambient);
+    JsonVec3(j, "fillDir", &m->fillDir);
+    m->fillDir = Vec3Norm(m->fillDir);
+    JsonColor(j, "fillColor", &m->fillColor);
+    // dog-round sky tint: blood red defaults; maps can override
+    m->dogSkyTop = (Color){ 40, 6, 6 };
+    m->dogSkyHorizon = (Color){ 120, 20, 16 };
+    m->dogFogColor = (Color){ 70, 12, 10 };
+    JsonColor(j, "dogSkyTop", &m->dogSkyTop);
+    JsonColor(j, "dogSkyHorizon", &m->dogSkyHorizon);
+    JsonColor(j, "dogFogColor", &m->dogFogColor);
 
-// Stairs from (x,z) heading along a unit axis (dx,dz) in {(±1,0),(0,±1)},
-// width w, rising to `total` over `steps` steps of 0.55 run each.
-static void Stairs(MapDef *m, float x, float z, float dx, float dz,
-                   float w, float total, int steps, int tex, float yBase) {
-    float rise = total/steps, run = 0.55f;
-    for (int i = 0; i < steps; i++) {
-        float top = yBase + (i+1)*rise;
-        if (fabsf(dx) > 0.5f) {
-            float x0, x1;
-            if (dx > 0) { x0 = x + i*run; x1 = x0 + run; }
-            else        { x1 = x - i*run; x0 = x1 - run; }
-            B(m, x0, yBase - 0.6f, z - w/2, x1, top, z + w/2, tex);
-        } else {
-            float z0, z1;
-            if (dz > 0) { z0 = z + i*run; z1 = z0 + run; }
-            else        { z1 = z - i*run; z0 = z1 - run; }
-            B(m, x - w/2, yBase - 0.6f, z0, x + w/2, top, z1, tex);
+    // boxes
+    JsonNode *boxes = JsonGet(j, "boxes");
+    for (int i = 0; i < JsonLen(boxes) && m->boxCount < MAX_BOXES; i++) {
+        JsonNode *b = JsonAt(boxes, i);
+        Vector3 mn, mx;
+        if (!JsonVec3(b, "min", &mn) || !JsonVec3(b, "max", &mx)) continue;
+        if (mn.x > mx.x) { float t = mn.x; mn.x = mx.x; mx.x = t; }
+        if (mn.y > mx.y) { float t = mn.y; mn.y = mx.y; mx.y = t; }
+        if (mn.z > mx.z) { float t = mn.z; mn.z = mx.z; mx.z = t; }
+        m->boxes[m->boxCount].aabb = AABB_Make(mn, mx);
+        m->boxes[m->boxCount].tex = TexFromName(JsonStr(b, "tex", "concrete"));
+        m->boxes[m->boxCount].noCollide = JsonBool(b, "noCollide", false);
+        m->boxes[m->boxCount].doorId = JsonInt(b, "door", 0);
+        m->boxCount++;
+    }
+    // doors
+    JsonNode *doors = JsonGet(j, "doors");
+    for (int i = 0; i < JsonLen(doors) && m->doorCount < MAX_DOORS; i++) {
+        JsonNode *d = JsonAt(doors, i);
+        Vector3 c;
+        if (!JsonVec3(d, "pos", &c)) continue;
+        m->doors[m->doorCount].name = strdup(JsonStr(d, "name", "Door"));
+        m->doors[m->doorCount].price = JsonInt(d, "price", 750);
+        m->doors[m->doorCount].center = c;
+        m->doorCount++;
+    }
+    // spawns
+    JsonNode *sp = JsonGet(j, "spawns");
+    for (int i = 0; i < JsonLen(sp) && m->spawnCount < MAX_SPAWNS; i++) {
+        JsonNode *s = JsonAt(sp, i);
+        Vector3 p;
+        if (!JsonVec3(s, "pos", &p)) continue;
+        m->spawns[m->spawnCount].pos = p;
+        m->spawns[m->spawnCount].doorId = JsonInt(s, "door", -1);
+        m->spawns[m->spawnCount].grave = JsonBool(s, "grave", false);
+        m->spawnCount++;
+    }
+    // wall buys (gun ids resolved through the loaded gun table)
+    JsonNode *wb = JsonGet(j, "wallbuys");
+    for (int i = 0; i < JsonLen(wb) && m->wallbuyCount < MAX_WALLBUYS; i++) {
+        JsonNode *w = JsonAt(wb, i);
+        Vector3 p;
+        if (!JsonVec3(w, "pos", &p)) continue;
+        int gi = GunIndex(JsonStr(w, "gun", ""));
+        if (gi < 0) {
+            printf("data: WARNING map \"%s\" wallbuy %d: unknown gun \"%s\" (skipped)\n",
+                   gMaps[m->mapIndex].name, i, JsonStr(w, "gun", "?"));
+            continue;
         }
+        m->wallbuys[m->wallbuyCount].widx = gi;
+        m->wallbuys[m->wallbuyCount].pos = p;
+        m->wallbuys[m->wallbuyCount].yaw = (float)JsonNum(w, "yaw", 0);
+        m->wallbuyCount++;
+    }
+    // perks
+    JsonNode *pk = JsonGet(j, "perks");
+    for (int i = 0; i < JsonLen(pk) && m->perkCount < MAX_PERKSTATIONS; i++) {
+        JsonNode *p = JsonAt(pk, i);
+        Vector3 pos;
+        if (!JsonVec3(p, "pos", &pos)) continue;
+        int pi = PerkIndex(JsonStr(p, "perk", ""));
+        if (pi < 0) {
+            printf("data: WARNING map \"%s\" perk %d: unknown perk \"%s\" (skipped)\n",
+                   gMaps[m->mapIndex].name, i, JsonStr(p, "perk", "?"));
+            continue;
+        }
+        m->perks[m->perkCount].perkType = pi;
+        m->perks[m->perkCount].pos = pos;
+        m->perks[m->perkCount].yaw = (float)JsonNum(p, "yaw", 0);
+        m->perkCount++;
+    }
+    // jump pads
+    JsonNode *pads = JsonGet(j, "pads");
+    for (int i = 0; i < JsonLen(pads) && m->padCount < MAX_JUMPPADS; i++) {
+        JsonNode *p = JsonAt(pads, i);
+        Vector3 pos, imp;
+        if (!JsonVec3(p, "pos", &pos) || !JsonVec3(p, "impulse", &imp)) continue;
+        m->pads[m->padCount].pos = pos;
+        m->pads[m->padCount].radius = 1.3f;
+        m->pads[m->padCount].impulse = imp;
+        m->padCount++;
+    }
+    // ziplines
+    JsonNode *zips = JsonGet(j, "ziplines");
+    for (int i = 0; i < JsonLen(zips) && m->ziplineCount < MAX_ZIPLINES; i++) {
+        JsonNode *z = JsonAt(zips, i);
+        Vector3 a, b;
+        if (!JsonVec3(z, "a", &a) || !JsonVec3(z, "b", &b)) continue;
+        m->ziplines[m->ziplineCount].a = a;
+        m->ziplines[m->ziplineCount].b = b;
+        m->ziplineCount++;
+    }
+    // killzones
+    JsonNode *kz = JsonGet(j, "killzones");
+    for (int i = 0; i < JsonLen(kz) && m->killzoneCount < MAX_KILLZONES; i++) {
+        JsonNode *k = JsonAt(kz, i);
+        Vector3 mn, mx;
+        if (!JsonVec3(k, "min", &mn) || !JsonVec3(k, "max", &mx)) continue;
+        m->killzones[m->killzoneCount] = AABB_Make(mn, mx);
+        m->killzoneCount++;
     }
 }
 
-
-// ============================================================================
-// MAP 1: THE GRAND THEATER
-// ============================================================================
-static void BuildTheater(MapDef *m) {
-    m->name = "The Grand Theater";
-    m->desc = "The curtain rose on the end of the world. Hold the stage.";
-    m->difficulty = 2;
-    m->skyTop = (Color){ 74, 84, 122 };
-    m->skyHorizon = (Color){ 165, 135, 160 };
-    m->fogColor = (Color){ 110, 96, 130 };
+// fallback procedural map when a map JSON is missing/corrupt: a plain
+// walled arena so the game is still playable, never a crash
+static void BuildFallbackMap(MapDef *m) {
+    printf("data: WARNING using fallback arena for \"%s\"\n", gMaps[m->mapIndex].name);
+    m->name = gMaps[m->mapIndex].name;
+    m->desc = gMaps[m->mapIndex].desc;
+    m->difficulty = gMaps[m->mapIndex].difficulty;
+    m->skyTop = (Color){ 40, 40, 48 };
+    m->skyHorizon = (Color){ 90, 84, 84 };
+    m->fogColor = (Color){ 60, 56, 60 };
     m->fogDensity = 0.012f;
-    m->sunDir = Vec3Norm(Vec3(-0.35f, -0.8f, 0.45f));
-    m->sunColor = (Color){ 190, 170, 200 };
-    m->ambient = (Color){ 130, 118, 145 };
-    m->fillDir = Vec3Norm(Vec3(0.35f, -0.6f, -0.45f));
-    m->fillColor = (Color){ 105, 95, 125 };
-    m->playerStart = Vec3(0, 0, 17.5f);
-    m->playerYaw = 180.0f;
-    m->boxPos = Vec3(0, 1.2f, -14.5f);
-
-    const int WALLH = 7;
-
-    // ---- Lobby (x -9..9, z 11..24) ----
-    B(m, -9.5f, -1, 10.5f, 9.5f, 0, 24.5f, TEX_MARBLE);
-    WallX(m, -9.5f, 9.5f, 24.2f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    WallX(m, -9.5f, -3.5f, 10.8f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    WallX(m,  3.5f,  9.5f, 10.8f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    WallZ(m, 10.8f, 24.2f, -9.3f, WALLH, 0.4f, TEX_VELVET, 17.5f, 1.6f);
-    WallZ(m, 10.8f, 24.2f,  9.3f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    DC(m, -2.0f, 0, 23.0f, -0.6f, 1.1f, 24.0f, TEX_WOOD);
-    DC(m,  0.6f, 0, 23.0f,  2.0f, 1.1f, 24.0f, TEX_WOOD);
-    DC(m, -1.4f, 0.012f, 11.2f, 1.4f, 0.03f, 23.8f, TEX_VELVET);
-
-    // door 0: lobby <-> auditorium
-    DoorAdd(m, "Auditorium Doors", 750, 0, 1.2f, 10.8f);
-    BDoor(m, 0, -3.3f, 0, 10.6f, -0.1f, 2.4f, 11.0f, TEX_PLANK);
-    BDoor(m, 0,  0.1f, 0, 10.6f,  3.3f, 2.4f, 11.0f, TEX_PLANK);
-
-    // stairs lobby -> balcony: climb north along west wall (through wall gap)
-    Stairs(m, -7.6f, 17.5f, 0, -1, 1.8f, 4.2f, 8, TEX_MARBLE, 0);
-    // balcony floor north of the stair top (stair top: x -8.5..-6.7, z 13.1, y 4.2)
-    B(m, -9.5f, 4.2f, 10.6f, -4.6f, 4.35f, 13.1f, TEX_MARBLE);
-    // balcony railings (south edge, leaving the stair opening clear)
-    B(m, -9.5f, 4.35f, 13.1f, -8.5f, 5.3f, 13.4f, TEX_VELVET);
-    B(m, -6.7f, 4.35f, 13.1f, -4.6f, 5.3f, 13.4f, TEX_VELVET);
-    B(m, -4.9f, 4.35f, 10.6f, -4.6f, 5.3f, 13.1f, TEX_VELVET);
-    B(m, -9.8f, 4.35f, 10.6f, -9.5f, 5.3f, 13.4f, TEX_VELVET);
-
-    // ---- Auditorium (x -14..14, z -12..10.6) ----
-    B(m, -14.2f, -1, -12.2f, 14.2f, 0, 10.6f, TEX_MARBLE);
-    WallX(m, -14.2f, 14.2f, -12.4f, WALLH+3, 0.4f, TEX_VELVET, 0, 0);
-    WallZ(m, -12.4f, 10.6f, -14.0f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    WallZ(m, -12.4f, -6.0f, 14.0f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    WallZ(m, -2.0f, 10.6f, 14.0f, WALLH, 0.4f, TEX_VELVET, 0, 0);
-    // seats
-    for (int row = 0; row < 5; row++) {
-        float z = 3.0f - row*1.6f;
-        for (int s = 0; s < 8; s++) {
-            float x = -12.0f + s*3.1f;
-            DC(m, x, 0, z, x+1.6f, 0.55f + row*0.12f, z+1.1f, TEX_VELVET);
-        }
+    m->sunDir = Vec3Norm(Vec3(-0.3f, -0.8f, 0.4f));
+    m->sunColor = (Color){ 180, 170, 160 };
+    m->ambient = (Color){ 120, 116, 120 };
+    m->fillDir = Vec3Norm(Vec3(0.3f, -0.5f, -0.4f));
+    m->fillColor = (Color){ 100, 96, 100 };
+    m->dogSkyTop = (Color){ 40, 6, 6 };
+    m->dogSkyHorizon = (Color){ 120, 20, 16 };
+    m->dogFogColor = (Color){ 70, 12, 10 };
+    m->playerStart = Vec3(0, 0, 0);
+    m->playerYaw = 0;
+    m->boxPos = Vec3(4, 0.1f, 4);
+    B(m, -14, -1, -14, 14, 0, 14, TEX_CONCRETE);
+    WallX(m, -14, 14, -13.8f, 5, 0.4f, TEX_BRICK);
+    WallX(m, -14, 14, 13.8f, 5, 0.4f, TEX_BRICK);
+    WallZ(m, -13.8f, 13.8f, -14, 5, 0.4f, TEX_BRICK);
+    WallZ(m, -13.8f, 13.8f, 14, 5, 0.4f, TEX_BRICK);
+    DoorAdd(m, "Courtyard Door", 750, 0, 1.2f, -13.8f);
+    BDoor(m, 0, -1.3f, 0, -14.0f, 1.3f, 2.4f, -13.6f, TEX_PLANK);
+    SpawnAdd(m, 0, -12, -1, false, 0);
+    SpawnAdd(m, -12, 0, -1, false, 0);
+    SpawnAdd(m, 12, 0, -1, false, 0);
+    WallBuyAdd(m, GunIndex("m1911") >= 0 ? GunIndex("m1911") : 0, -13.6f, 1.4f, 3, 90);
+    WallBuyAdd(m, GunIndex("mp5k") >= 0 ? GunIndex("mp5k") : 0, 13.6f, 1.4f, -3, 270);
+    for (int i = 0; i < gPerkCount && i < MAX_PERKSTATIONS; i++) {
+        float a = (float)i / gPerkCount * 2*PI;
+        PerkAddIdx(m, i, cosf(a) * 11, 0, sinf(a) * 11, 0);
     }
-    DC(m, -1.5f, 6.4f, -1.5f, 1.5f, 7.0f, 1.5f, TEX_METAL);
-    // west balcony over auditorium floor (from lobby balcony continue)
-    B(m, -14.0f, 4.2f, -2.0f, -9.6f, 4.35f, 10.6f, TEX_MARBLE);
-    B(m, -9.9f, 4.35f, -2.0f, -9.6f, 5.3f, 10.6f, TEX_VELVET);
-    B(m, -14.0f, 4.35f, -2.3f, -9.6f, 5.3f, -2.0f, TEX_VELVET);
-    B(m, -12.9f, 4.35f, 10.3f, -9.6f, 5.3f, 10.6f, TEX_VELVET);
-
-    // ---- Stage (z -20..-12.4) raised 1.2 ----
-    B(m, -14.2f, 0, -20.0f, 14.2f, 1.2f, -12.4f, TEX_PLANK);
-    Stairs(m, -13.0f, -12.4f, 0, -1, 2.0f, 1.2f, 3, TEX_PLANK, 0);
-    Stairs(m,  13.0f, -12.4f, 0, -1, 2.0f, 1.2f, 3, TEX_PLANK, 0);
-    WallZ(m, -20.0f, -12.4f, -14.0f, WALLH+3, 0.4f, TEX_VELVET, 0, 0);
-    WallZ(m, -20.0f, -12.4f,  14.0f, WALLH+3, 0.4f, TEX_VELVET, 0, 0);
-    DC(m, -14.2f, 4.6f, -12.8f, 14.2f, 5.4f, -12.4f, TEX_VELVET);
-    DC(m, -13.8f, 1.2f, -19.6f, -10.0f, 6.6f, -19.2f, TEX_CURTAIN);
-    DC(m,  10.0f, 1.2f, -19.6f, 13.8f, 6.6f, -19.2f, TEX_CURTAIN);
-    DC(m, -10.0f, 6.2f, -19.6f, 10.0f, 6.9f, -19.2f, TEX_CURTAIN);
-    B(m, -14.2f, 1.2f, -13.6f, 14.2f, 1.5f, -13.4f, TEX_WOOD);
-
-    // door 1: backstage
-    DoorAdd(m, "Backstage Door", 1000, 0, 1.2f, -20.2f);
-    BDoor(m, 1, -1.3f, 0.0f, -20.4f, 1.3f, 2.4f, -19.9f, TEX_PLANK);
-    B(m, -8.2f, -1, -26.2f, 8.2f, 0, -20.0f, TEX_PLANK);
-    WallX(m, -8.2f, -1.5f, -20.2f, 5, 0.4f, TEX_PLANK, 0, 0);
-    WallX(m,  1.5f,  8.2f, -20.2f, 5, 0.4f, TEX_PLANK, 0, 0);
-    B(m, -1.5f, 2.4f, -20.4f, 1.5f, 5.0f, -19.9f, TEX_PLANK);
-    // walkway at stage height joining the stair tops to the door mouth, so
-    // the backstage -> door -> stage route is level (zombies path through)
-    B(m, -5.4f, 0, -20.55f, 5.4f, 1.2f, -19.9f, TEX_PLANK);
-    WallX(m, -8.2f, 8.2f, -26.4f, 5, 0.4f, TEX_PLANK, 0, 0);
-    WallZ(m, -26.4f, -20.2f, -8.0f, 5, 0.4f, TEX_PLANK, 0, 0);
-    // stairs backstage floor (y 0) up onto the stage (y 1.2), fully inside
-    // the backstage with the top step flush against the stage face -
-    // zombies spawned here must be able to path out instead of hammering
-    // the stage wall
-    Stairs(m, 5.4f, -21.65f, 0, 1, 1.8f, 1.2f, 3, TEX_PLANK, 0);
-    Stairs(m, -5.4f, -21.65f, 0, 1, 1.8f, 1.2f, 3, TEX_PLANK, 0);
-    DC(m, -7.0f, 0, -25.5f, -5.5f, 2.2f, -24.0f, TEX_WOOD);
-    DC(m,  5.5f, 0, -25.5f,  7.0f, 2.2f, -24.0f, TEX_WOOD);
-
-    // door 2: alley (auditorium east)
-    DoorAdd(m, "Alley Door", 1000, 14.0f, 1.2f, -4.0f);
-    BDoor(m, 2, 13.8f, 0, -5.9f, 14.2f, 2.4f, -4.4f, TEX_PLANK);
-    BDoor(m, 2, 13.8f, 0, -3.6f, 14.2f, 2.4f, -2.1f, TEX_PLANK);
-    B(m, 14.2f, -1, -12.0f, 20.4f, 0, 10.6f, TEX_ASPHALT);
-    WallX(m, 14.2f, 20.4f, -12.2f, 6, 0.4f, TEX_BRICK, 0, 0);
-    WallX(m, 14.2f, 20.4f, 10.8f, 6, 0.4f, TEX_BRICK, 0, 0);
-    WallZ(m, -12.2f, 10.8f, 20.2f, 6, 0.4f, TEX_BRICK, 0, 0);
-    WallZ(m, -12.2f, -6.0f, 14.2f, 6, 0.4f, TEX_BRICK, 0, 0);
-    WallZ(m, -2.0f, 10.8f, 14.2f, 6, 0.4f, TEX_BRICK, 0, 0);
-
-    DC(m, -14.2f, 9.9f, -26.2f, 20.4f, 10.2f, 24.5f, TEX_VELVET);
-
-    // wall buys / perks
-    WallBuyAdd(m, W_OLYMPIA, -8.9f, 1.5f, 23.6f, 90);
-    WallBuyAdd(m, W_MP5K, -13.7f, 1.5f, 2.0f, 90);
-    WallBuyAdd(m, W_STAKEOUT, 7.0f, 1.5f, -25.9f, 0);
-    WallBuyAdd(m, W_AK74U, 19.9f, 1.5f, 4.0f, 270);
-    WallBuyAdd(m, W_M16, -13.7f, 5.7f, 8.4f, 90);
-    PerkAdd(m, PERK_REVIVE, 8.2f, 0, 22.8f, 270);
-    PerkAdd(m, PERK_RAPID, -12.9f, 0, -3.0f, 90);
-    PerkAdd(m, PERK_SWIFT, -6.8f, 0, -25.4f, 0);
-    PerkAdd(m, PERK_REGEN, 19.4f, 0, -10.8f, 0);
-    PerkAdd(m, PERK_STAMIN, -12.0f, 4.2f, 6.0f, 90);   // balcony
-
-    // spawns
-    SpawnAdd(m, 0, 12.6f, -1, false, 0);
-    SpawnAdd(m, 8.6f, 12.6f, -1, false, 0);
-    SpawnAdd(m, -13.2f, -6.0f, -1, false, 0);
-    SpawnAdd(m, -13.2f, 8.0f, -1, false, 0);   // auditorium west (was sealed balcony)
-    SpawnAdd(m, 6.0f, -21.4f, 1, false, 0);
-    SpawnAdd(m, -6.0f, -21.4f, 1, false, 0);
-    SpawnAdd(m, 19.2f, -8.0f, 2, false, 0);
-    SpawnAdd(m, 19.2f, 8.0f, 2, false, 0);
-    SpawnAdd(m, 19.2f, 2.0f, 2, false, 0);
 }
-
-// ============================================================================
-// MAP 2: BUNKER 44
-// ============================================================================
-static void BuildBunker(MapDef *m) {
-    m->name = "Bunker 44";
-    m->desc = "Holding position in the ruins of the final offensive.";
-    m->difficulty = 3;
-    m->skyTop = (Color){ 96, 88, 74 };
-    m->skyHorizon = (Color){ 158, 128, 88 };
-    m->fogColor = (Color){ 128, 110, 84 };
-    m->fogDensity = 0.018f;
-    m->sunDir = Vec3Norm(Vec3(0.5f, -0.7f, -0.3f));
-    m->sunColor = (Color){ 235, 205, 155 };
-    m->ambient = (Color){ 140, 128, 105 };
-    m->fillDir = Vec3Norm(Vec3(-0.5f, -0.5f, 0.3f));
-    m->fillColor = (Color){ 120, 105, 85 };
-    m->playerStart = Vec3(0, 0, 7);
-    m->playerYaw = 180.0f;
-    m->boxPos = Vec3(-27, 0, 4);
-
-    B(m, -32, -1, -28, 32, 0, 28, TEX_DIRT);
-    // perimeter sandbag walls
-    for (int i = 0; i < 32; i++) {
-        float x = -32 + i*2;
-        B(m, x, 0, -28, x+2, 1.7f, -27.6f, TEX_SANDBAG);
-        B(m, x, 0, 27.6f, x+2, 1.7f, 28, TEX_SANDBAG);
-    }
-    for (int i = 0; i < 28; i++) {
-        float z = -28 + i*2;
-        B(m, -32, 0, z, -31.6f, 1.7f, z+2, TEX_SANDBAG);
-        B(m, 31.6f, 0, z, 32, 1.7f, z+2, TEX_SANDBAG);
-    }
-
-    // ---- Command bunker (spawn, center-south) ----
-    B(m, -6, -0.2f, 2, 6, 0, 12, TEX_CONCRETE);
-    WallX(m, -6, -1.5f, 2.2f, 3.2f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallX(m, 1.5f, 6, 2.2f, 2.6f, 0.5f, TEX_CONCRETE, 0, 0);
-    B(m, -1.5f, 2.4f, 1.95f, 1.5f, 3.2f, 2.45f, TEX_CONCRETE);
-    B(m, 1.5f, 2.4f, 1.95f, 6.0f, 3.2f, 2.45f, TEX_CONCRETE);
-    WallX(m, -6, 6, 11.8f, 3.2f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, 2.2f, 11.8f, -5.8f, 3.2f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, 2.2f, 11.8f, 5.8f, 3.2f, 0.05f, TEX_CONCRETE, 0, 0);
-    B(m, -6, 3.2f, 2, 6, 3.5f, 12, TEX_CONCRETE);
-    DC(m, -5.2f, 0.75f, 10.4f, -3.4f, 1.05f, 11.4f, TEX_WOOD);
-    DC(m, -4.9f, 1.05f, 10.6f, -4.0f, 1.35f, 11.2f, TEX_METAL);
-
-    // ---- north trench: z from 2 down to -20, walls at x ±1.9 ----
-    for (int i = 0; i < 11; i++) {
-        float z = 2 - i*2;
-        B(m, -2.2f, 0, z-2, -1.8f, 1.6f, z, TEX_SANDBAG);
-        B(m, 1.8f, 0, z-2, 2.2f, 1.6f, z, TEX_SANDBAG);
-    }
-    // east trench: x from 2 to 26, z centered -4
-    for (int i = 0; i < 12; i++) {
-        float x = 2 + i*2;
-        B(m, x, 0, -6.2f, x+2, 1.6f, -5.8f, TEX_SANDBAG);
-        B(m, x, 0, -2.2f, x+2, 1.6f, -1.8f, TEX_SANDBAG);
-    }
-    // west trench: x from -2 to -26, z centered 5.5
-    for (int i = 0; i < 12; i++) {
-        float x = -2 - i*2;
-        B(m, x-2, 0, 3.5f, x, 1.6f, 3.9f, TEX_SANDBAG);
-        B(m, x-2, 0, 7.1f, x, 1.6f, 7.5f, TEX_SANDBAG);
-    }
-    // south trench: z from 12 to 24, x ±1.9
-    for (int i = 0; i < 6; i++) {
-        float z = 12 + i*2;
-        B(m, -2.2f, 0, z, -1.8f, 1.6f, z+2, TEX_SANDBAG);
-        B(m, 1.8f, 0, z, 2.2f, 1.6f, z+2, TEX_SANDBAG);
-    }
-
-    // ---- Bunker A (west, door 0) ----
-    DoorAdd(m, "West Bunker Door", 750, -27.9f, 1.2f, 5.5f);
-    BDoor(m, 0, -28.3f, 0, 4.1f, -27.9f, 2.4f, 6.9f, TEX_METAL);
-    B(m, -30, -0.2f, -2, -24, 0, 10, TEX_CONCRETE);
-    WallX(m, -30, -24, -2.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallX(m, -30, -28.3f, 9.8f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallX(m, -27.9f, -24, 9.8f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    B(m, -28.3f, 2.4f, 9.55f, -27.9f, 3.4f, 10.05f, TEX_CONCRETE);
-    WallZ(m, -2.2f, 9.8f, -30.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -2.2f, 4.1f, -24.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, 6.9f, 9.8f, -24.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    B(m, -30, 3.4f, -2, -24, 3.7f, 10, TEX_CONCRETE);
-    DC(m, -29.6f, 0, 8.6f, -29.0f, 1.6f, 9.4f, TEX_SANDBAG);
-
-    // ---- Bunker B (north, door 1) ----
-    DoorAdd(m, "North Bunker Door", 1000, 0, 1.2f, -20.3f);
-    BDoor(m, 1, -1.4f, 0, -20.6f, 1.4f, 2.4f, -19.9f, TEX_METAL);
-    B(m, -10, -0.2f, -26, 10, 0, -20, TEX_CONCRETE);
-    WallX(m, -10, -1.5f, -26.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallX(m, 1.5f, 10, -26.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    B(m, -1.5f, 2.4f, -26.45f, 1.5f, 3.4f, -25.95f, TEX_CONCRETE);
-    WallZ(m, -26.2f, -20.2f, -10.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -26.2f, -20.2f, 10.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    B(m, -10, 3.4f, -26, 10, 3.7f, -20, TEX_CONCRETE);
-    // inner armory wall
-    WallX(m, -10, -7.8f, -22.4f, 3.4f, 0.4f, TEX_CONCRETE, 0, 0);
-    WallX(m, -6.2f, -4, -22.4f, 3.4f, 0.4f, TEX_CONCRETE, 0, 0);
-    B(m, -7.8f, 2.4f, -22.6f, -6.2f, 3.4f, -22.2f, TEX_CONCRETE);
-    DC(m, -9.6f, 0.8f, -25.4f, -8.4f, 1.1f, -24.6f, TEX_WOOD);
-    DC(m, -8.0f, 0, -25.6f, -6.8f, 1.3f, -24.4f, TEX_WOOD);
-
-    // ---- Ammo depot (east, door 2) ----
-    DoorAdd(m, "Ammo Depot Door", 1250, 25.9f, 1.2f, -4.0f);
-    BDoor(m, 2, 25.8f, 0, -6.1f, 26.2f, 2.4f, -4.4f, TEX_METAL);
-    BDoor(m, 2, 25.8f, 0, -3.6f, 26.2f, 2.4f, -1.9f, TEX_METAL);
-    B(m, 20, -0.2f, -12, 30, 0, 4, TEX_CONCRETE);
-    WallX(m, 20, 30, -12.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallX(m, 20, 30, 4.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -12.2f, 4.2f, 30.2f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -12.2f, -6.1f, 19.8f, 3.4f, 0.5f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -1.9f, 4.2f, 19.8f, 2.6f, 0.05f, TEX_CONCRETE, 0, 0);
-    B(m, 20, 3.4f, -12, 30, 3.7f, 4, TEX_CONCRETE);
-    for (int i = 0; i < 4; i++) DC(m, 21+i*2.2f, 0, -10.5f, 22.4f+i*2.2f, 1.4f, -9.1f, TEX_WOOD);
-
-    // craters + tank decor
-    static const float craters[][2] = {{-14,-18},{10,-16},{14,8},{-18,14},{8,18},{-22,-10},{16,-22},{24,14},{-8,-24},{20,22}};
-    for (unsigned i = 0; i < sizeof(craters)/sizeof(craters[0]); i++) {
-        float cx = craters[i][0], cz = craters[i][1];
-        DC(m, cx-1.2f, 0, cz-1.2f, cx+1.2f, 0.18f, cz+1.2f, TEX_DIRT);
-    }
-    DC(m, 8, 0, -14, 12, 1.5f, -11, TEX_RUST);
-    DC(m, 9, 1.5f, -13.4f, 11, 2.3f, -11.6f, TEX_RUST);
-    DC(m, 11.6f, 0.8f, -13.0f, 14.2f, 1.1f, -12.2f, TEX_RUST);
-
-    WallBuyAdd(m, W_MP5K, -1.9f, 1.4f, 11.5f, 0);
-    WallBuyAdd(m, W_MPL, -29.9f, 1.4f, -1.0f, 0);
-    WallBuyAdd(m, W_HS10, 9.5f, 1.4f, -25.9f, 0);
-    WallBuyAdd(m, W_ENFIELD, 29.9f, 1.4f, -11.5f, 0);
-    WallBuyAdd(m, W_CZ75, 1.9f, 1.4f, 13.5f, 0);
-    PerkAdd(m, PERK_REVIVE, 4.8f, 0, 10.8f, 180);
-    PerkAdd(m, PERK_SWIFT, -28.8f, 0, 8.6f, 180);
-    PerkAdd(m, PERK_RAPID, 8.6f, 0, -25.4f, 180);
-    PerkAdd(m, PERK_REGEN, 28.8f, 0, 2.8f, 180);
-    PerkAdd(m, PERK_STAMIN, 0.0f, 0, 25.5f, 0);        // south field
-
-    SpawnAdd(m, -30.5f, -0.5f, -1, false, 0);
-    SpawnAdd(m, -30.5f, 6.5f, -1, false, 0);
-    SpawnAdd(m, 0, -25.4f, 1, false, 0);
-    SpawnAdd(m, 6, -25.4f, 1, false, 0);
-    SpawnAdd(m, 29.4f, -9.0f, 2, false, 0);
-    SpawnAdd(m, 29.4f, 1.0f, 2, false, 0);
-    SpawnAdd(m, 0, 26.5f, -1, false, 0);
-    SpawnAdd(m, -3.5f, 26.5f, -1, false, 0);
-    SpawnAdd(m, 3.5f, 26.5f, -1, false, 0);
-    SpawnAdd(m, -25.0f, 26.5f, -1, false, 0);
-    SpawnAdd(m, 25.0f, 26.5f, -1, false, 0);
-}
-
-// ============================================================================
-// MAP 3: GRAVEYARD HOLLOW
-// ============================================================================
-static void BuildGraveyard(MapDef *m) {
-    m->name = "Graveyard Hollow";
-    m->desc = "The dead were never resting. The church is your only refuge.";
-    m->difficulty = 4;
-    m->skyTop = (Color){  6,  8, 16 };
-    m->skyHorizon = (Color){ 24, 28, 40 };
-    m->fogColor = (Color){ 16, 20, 28 };
-    m->fogDensity = 0.030f;
-    m->sunDir = Vec3Norm(Vec3(0.2f, -0.85f, -0.4f));
-    m->sunColor = (Color){ 70, 85, 120 };
-    m->ambient = (Color){ 55, 62, 82 };
-    m->fillDir = Vec3Norm(Vec3(-0.2f, -0.5f, 0.4f));
-    m->fillColor = (Color){ 70, 82, 110 };
-    m->playerStart = Vec3(0, 0, 26);
-    m->playerYaw = 0.0f;
-    m->boxPos = Vec3(0, 0.1f, -8.5f);   // inside the church, before the altar
-
-    B(m, -38, -1, -34, 38, 0, 34, TEX_GRASS);
-    WallX(m, -38, 38, -33.8f, 2.6f, 0.6f, TEX_STONE, 0, 0);
-    WallX(m, -38, 38, 33.8f, 2.6f, 0.6f, TEX_STONE, 0, 0);
-    WallZ(m, -33.8f, 33.8f, -37.8f, 2.6f, 0.6f, TEX_STONE, 0, 0);
-    WallZ(m, -33.8f, 33.8f, 37.8f, 2.6f, 0.6f, TEX_STONE, 0, 0);
-    DC(m, -2.2f, 0.012f, 6.0f, 2.2f, 0.03f, 33.5f, TEX_DIRT);
-
-    // ---- Church (center) ----
-    B(m, -7.4f, -0.2f, -10.4f, 7.4f, 0, 6.4f, TEX_TILE);
-    WallX(m, -7.4f, -2.2f, -10.6f, 6, 0.5f, TEX_STUCCO, 0, 0);
-    WallX(m, 2.2f, 7.4f, -10.6f, 6, 0.5f, TEX_STUCCO, 0, 0);
-    B(m, -2.2f, 2.6f, -10.85f, 2.2f, 6.0f, -10.35f, TEX_STUCCO);
-    WallZ(m, -10.6f, 6.6f, -7.2f, 6, 0.5f, TEX_STUCCO, -2.0f, 1.3f);
-    WallZ(m, -10.6f, 6.6f, 7.2f, 6, 0.5f, TEX_STUCCO, -2.0f, 1.3f);
-    B(m, -7.4f, 6.0f, -10.4f, 7.4f, 6.3f, 6.4f, TEX_ROOF);
-    DC(m, -7.6f, 5.0f, -10.8f, 0, 8.2f, -10.2f, TEX_ROOF);
-    DC(m, 0, 5.0f, -10.8f, 7.6f, 8.2f, -10.2f, TEX_ROOF);
-    DC(m, -7.6f, 5.0f, 6.2f, 0, 8.2f, 6.8f, TEX_ROOF);
-    DC(m, 0, 5.0f, 6.2f, 7.6f, 8.2f, 6.8f, TEX_ROOF);
-    // steeple tower (south, x -3..3, z 6.6..12.2)
-    B(m, -3.2f, -0.2f, 6.6f, 3.2f, 0, 12.2f, TEX_TILE);
-    WallX(m, -3.2f, -1.1f, 12.4f, 9, 0.5f, TEX_STUCCO, 0, 0);
-    WallX(m, 1.1f, 3.2f, 12.4f, 9, 0.5f, TEX_STUCCO, 0, 0);
-    B(m, -1.1f, 2.6f, 12.15f, 1.1f, 9.0f, 12.65f, TEX_STUCCO);
-    WallZ(m, 6.6f, 12.4f, -3.0f, 9, 0.5f, TEX_STUCCO, 7.5f, 1.3f);
-    WallZ(m, 6.6f, 12.4f, 3.0f, 9, 0.5f, TEX_STUCCO, 7.5f, 1.3f);
-    DC(m, -3.2f, 9.0f, 6.6f, 3.2f, 14.0f, 12.2f, TEX_ROOF);
-    DC(m, -1.0f, 14.0f, 9.0f, 1.0f, 17.0f, 11.0f, TEX_ROOF);
-    // pews
-    for (int r = 0; r < 4; r++) {
-        float z = 3.4f - r*1.7f;
-        DC(m, -6.2f, 0, z, -1.4f, 0.5f, z+0.9f, TEX_PLANK);
-        DC(m, 1.4f, 0, z, 6.2f, 0.5f, z+0.9f, TEX_PLANK);
-    }
-    B(m, -1.6f, 0, -9.9f, 1.6f, 0.5f, -8.7f, TEX_STONE);
-    DC(m, -0.3f, 0.5f, -9.6f, 0.3f, 1.6f, -9.0f, TEX_METAL);
-
-    // ---- Crypt (door 0, NE) ----
-    DoorAdd(m, "Crypt Gate", 750, 20.0f, 1.2f, -14.0f);
-    BDoor(m, 0, 19.8f, 0, -14.7f, 20.2f, 2.4f, -13.3f, TEX_METAL);
-    B(m, 14, -0.2f, -20, 26, 0, -8, TEX_STONE);
-    WallX(m, 14, 19.8f, -20.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallX(m, 20.2f, 26, -20.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    B(m, 19.8f, 2.4f, -20.45f, 20.2f, 3.6f, -19.95f, TEX_STONE);
-    WallX(m, 14, 26, -7.8f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallZ(m, -20.2f, -14.7f, 14.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallZ(m, -13.3f, -7.8f, 14.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallZ(m, -20.2f, -7.8f, 25.8f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    B(m, 14, 3.6f, -20, 26, 3.9f, -8, TEX_STONE);
-    DC(m, 15.2f, 0, -18.6f, 16.4f, 1.1f, -17.4f, TEX_GRAVE);
-    DC(m, 23.6f, 0, -18.6f, 24.8f, 1.1f, -17.4f, TEX_GRAVE);
-
-    // ---- Mausoleum (door 1, SW) ----
-    DoorAdd(m, "Mausoleum Gate", 1000, -26.0f, 1.2f, 24.4f);
-    BDoor(m, 1, -26.4f, 0, 23.7f, -26.0f, 2.4f, 25.1f, TEX_METAL);
-    B(m, -30, -0.2f, 12, -22, 0, 26, TEX_STONE);
-    WallX(m, -30, -22, 11.8f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallX(m, -30, -26.4f, 26.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallX(m, -26.0f, -22, 26.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    B(m, -26.4f, 2.4f, 25.85f, -26.0f, 3.6f, 26.35f, TEX_STONE);
-    WallZ(m, 11.8f, 26.2f, -30.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    WallZ(m, 11.8f, 26.2f, -22.2f, 3.6f, 0.5f, TEX_STONE, 0, 0);
-    B(m, -30, 3.6f, 12, -22, 3.9f, 26, TEX_STONE);
-    DC(m, -29.2f, 0, 13.2f, -28.0f, 1.2f, 14.4f, TEX_GRAVE);
-    DC(m, -24.0f, 0, 13.2f, -22.8f, 1.2f, 14.4f, TEX_GRAVE);
-
-    // ---- graves + rising spawns ----
-    static const float graveSpots[][2] = {
-        {-14,20},{-18,18},{-22,22},{-26,16},{-30,20},{-12,24},{-16,28},{-20,26},{-10,16},
-        {-14,10},{-18,6},{-22,2},{-26,-2},{-30,6},{-12,-4},{-16,-8},{-20,-14},{-24,-18},
-        { 14,20},{ 18,24},{ 22,20},{ 26,24},{ 30,20},{ 12,16},{ 16,12},{ 20,8},{ 24,4},
-        { 28,8},{ 12,6},{ 16,2},{ 20,-2},{ 24,-8},{ 28,-4},{ 14,-4},{ 18,-16},{ 22,-20},
-        { 26,-24},{ 30,-16},{ 10,-14},{ 6,-18},{ 2,-22},{-4,-18},{-8,-24},{ 8,-24},{-6,-28},
-        {-12,-20},{-16,-26},{-20,-24},{-24,-26},{-28,-22},{ 4,-26},{ 8,-28},{-2,-30},{-6,-24},
-    };
-    for (unsigned i = 0; i < sizeof(graveSpots)/sizeof(graveSpots[0]); i++) {
-        float gx = graveSpots[i][0], gz = graveSpots[i][1];
-        if (gx > -8.5f && gx < 8.5f && gz > -11.5f && gz < 12.8f) continue;
-        if (gx > 13.5f && gx < 26.5f && gz > -20.5f && gz < -7.5f) continue;   // crypt
-        if (gx > -30.5f && gx < -21.5f && gz > 11.5f && gz < 26.5f) continue;  // mausoleum
-        DC(m, gx-0.45f, 0, gz-0.15f, gx+0.45f, 1.05f, gz+0.15f, TEX_GRAVE);
-        DC(m, gx-0.7f, 0.012f, gz-1.1f, gx+0.7f, 0.05f, gz+1.1f, TEX_DIRT);
-        SpawnAdd(m, gx, gz, -1, true, 0);
-    }
-    // dead trees
-    static const float trees[][2] = {{-10,10},{10,-10},{-32,-8},{32,-12},{-8,30},{12,30},{-34,26},{34,26},{-34,-30},{34,-30}};
-    for (unsigned i = 0; i < sizeof(trees)/sizeof(trees[0]); i++) {
-        float tx = trees[i][0], tz = trees[i][1];
-        DC(m, tx-0.25f, 0, tz-0.25f, tx+0.25f, 4.5f, tz+0.25f, TEX_WOOD);
-        DC(m, tx-1.6f, 3.6f, tz-0.1f, tx+1.6f, 3.9f, tz+0.1f, TEX_WOOD);
-        DC(m, tx-0.1f, 3.9f, tz-1.4f, tx+0.1f, 4.2f, tz+1.4f, TEX_WOOD);
-    }
-
-    WallBuyAdd(m, W_OLYMPIA, -7.0f, 1.4f, 22.0f, 90);
-    WallBuyAdd(m, W_STAKEOUT, 14.5f, 1.4f, -19.5f, 90);
-    WallBuyAdd(m, W_M16, -29.5f, 1.4f, 20.5f, 90);
-    WallBuyAdd(m, W_CZ75, 6.8f, 1.4f, 0.0f, 270);
-    PerkAdd(m, PERK_REVIVE, 5.8f, 0, 30.5f, 180);
-    PerkAdd(m, PERK_REGEN, -5.8f, 0, 30.5f, 180);
-    PerkAdd(m, PERK_SWIFT, 24.8f, 0, -18.5f, 180);
-    PerkAdd(m, PERK_RAPID, -28.8f, 0, 22.5f, 180);
-    PerkAdd(m, PERK_STAMIN, 0.0f, 0, 10.0f, 0);        // church steeple
-
-    SpawnAdd(m, 0, -33.0f, -1, false, 0);
-    SpawnAdd(m, -36.0f, -33.0f, -1, false, 0);
-    SpawnAdd(m, 36.0f, -33.0f, -1, false, 0);
-    SpawnAdd(m, 24.0f, -18.5f, 0, false, 0);
-    SpawnAdd(m, -26.0f, 22.0f, 1, false, 0);
-    SpawnAdd(m, 0, -11.0f, -1, false, 0);
-}
-
-// ============================================================================
-// MAP 4: DIE ARISE
-// ============================================================================
-static void BuildDieArise(MapDef *m) {
-    m->name = "Die Arise";
-    m->desc = "The city is gone. Only the rooftops remain - and they go up.";
-    m->difficulty = 5;
-    m->skyTop = (Color){ 18, 22, 40 };
-    m->skyHorizon = (Color){ 90, 60, 70 };
-    m->fogColor = (Color){ 40, 34, 52 };
-    m->fogDensity = 0.008f;
-    m->sunDir = Vec3Norm(Vec3(-0.4f, -0.75f, 0.3f));
-    m->sunColor = (Color){ 200, 150, 130 };
-    m->ambient = (Color){ 98, 88, 108 };
-    m->fillDir = Vec3Norm(Vec3(0.4f, -0.55f, -0.3f));
-    m->fillColor = (Color){ 110, 98, 130 };
-    m->playerStart = Vec3(0, 0, 2);
-    m->playerYaw = 90.0f;
-    m->boxPos = Vec3(-26, 0.1f, 10);
-
-    // ---- Tower A (spawn): x -8..8, z -8..8, roof y=0 ----
-    DC(m, -8, -40, -8, 8, -0.6f, 8, TEX_CONCRETE);
-    B(m, -8, -1, -8, 8, 0, 8, TEX_CONCRETE);
-    B(m, -8, 0, -8, 8, 0.9f, -7.6f, TEX_CONCRETE);
-    B(m, -8, 0, 7.6f, 8, 0.9f, 8, TEX_CONCRETE);
-    B(m, -8, 0, -8, -7.6f, 0.9f, 8, TEX_CONCRETE);
-    B(m, 7.6f, 0, -8, 8, 0.9f, 8, TEX_CONCRETE);
-    B(m, -2, 0, 5.6f, 2, 2.6f, 7.6f, TEX_BRICK);
-    B(m, -2, 2.6f, 5.6f, 2, 2.9f, 7.6f, TEX_CONCRETE);
-    DC(m, -6.5f, 0, -6.5f, -4.5f, 1.0f, -4.5f, TEX_METAL);
-    DC(m, 4.5f, 0, -6.8f, 6.5f, 1.2f, -4.8f, TEX_METAL);
-
-    // ---- plank bridge A -> B (east), door 0 ----
-    B(m, 8, -0.25f, -1.0f, 24, 0, 1.0f, TEX_PLANK);
-    B(m, 8, 0.45f, -1.3f, 24, 0.75f, -1.0f, TEX_PLANK);
-    B(m, 8, 0.45f, 1.0f, 24, 0.75f, 1.3f, TEX_PLANK);
-    DoorAdd(m, "Bridge Barricade", 750, 16.0f, 1.2f, 0);
-    BDoor(m, 0, 15.6f, 0, -1.3f, 16.4f, 2.2f, 1.3f, TEX_PLANK);
-
-    // ---- Tower B: x 24..38, z -7..7 ----
-    DC(m, 24, -40, -7, 38, -0.6f, 7, TEX_CONCRETE);
-    B(m, 24, -1, -7, 38, 0, 7, TEX_CONCRETE);
-    B(m, 24, 0, -7, 38, 0.9f, -6.6f, TEX_CONCRETE);
-    B(m, 24, 0, 6.6f, 38, 0.9f, 7, TEX_CONCRETE);
-    B(m, 24, 0, -7, 24.4f, 0.9f, 7, TEX_CONCRETE);
-    B(m, 37.6f, 0, -7, 38, 0.9f, 7, TEX_CONCRETE);
-    // raised deck on B (y 2.4): x 26..38, z -6.5..4 with stairs from roof
-    Stairs(m, 30.0f, 3.6f, 1, 0, 2.0f, 2.4f, 5, TEX_METAL, 0);
-    B(m, 26, 2.4f, -6.5f, 38, 2.55f, 3.2f, TEX_METAL);
-    B(m, 26, 2.55f, -6.5f, 38, 3.3f, -6.1f, TEX_METAL);
-    B(m, 26, 2.55f, 2.9f, 38, 3.3f, 3.2f, TEX_METAL);
-    B(m, 25.6f, 2.55f, -6.5f, 26, 3.3f, 3.2f, TEX_METAL);
-    B(m, 37.6f, 2.55f, -6.5f, 38, 3.3f, 3.2f, TEX_METAL);
-    DC(m, 36.0f, 2.55f, -5.5f, 37.5f, 3.5f, -4.0f, TEX_METAL);
-
-    // ---- Tower C (west): x -32..-20, z 4..16 ----
-    DC(m, -32, -40, 4, -20, -0.6f, 16, TEX_CONCRETE);
-    B(m, -32, -1, 4, -20, 0, 16, TEX_CONCRETE);
-    B(m, -32, 0, 4, -20, 0.9f, 4.4f, TEX_CONCRETE);
-    B(m, -32, 0, 15.6f, -20, 0.9f, 16, TEX_CONCRETE);
-    B(m, -32, 0, 4, -31.6f, 0.9f, 16, TEX_CONCRETE);
-    B(m, -20.4f, 0, 4, -20, 0.9f, 16, TEX_CONCRETE);
-    DC(m, -30.5f, 0, 5.5f, -29.5f, 3.2f, 6.5f, TEX_RUST);
-    DC(m, -31.2f, 3.2f, 4.8f, -28.8f, 5.6f, 7.2f, TEX_RUST);
-    DC(m, -27, 0, 13.5f, -25, 5.0f, 13.8f, TEX_METAL);
-    DC(m, -29.5f, 4.6f, 11.0f, -22.5f, 6.6f, 11.4f, TEX_RUST);
-
-    // ---- A <-> C walkway: south plank + corner platform ----
-    // plank from A south edge to corner platform at (-13.5, 5)
-    B(m, -13.5f, -0.25f, 2.0f, -8, 0, 4.0f, TEX_PLANK);
-    B(m, -13.5f, 0.45f, 1.7f, -8, 0.75f, 2.0f, TEX_PLANK);
-    B(m, -13.5f, 0.45f, 4.0f, -8, 0.75f, 4.3f, TEX_PLANK);
-    // corner platform
-    B(m, -16, -0.25f, 2.0f, -13.5f, 0, 7.0f, TEX_PLANK);
-    B(m, -16, 0.45f, 1.7f, -13.5f, 0.75f, 2.0f, TEX_PLANK);
-    B(m, -16, 0.45f, 7.0f, -13.5f, 0.75f, 7.3f, TEX_PLANK);
-    // plank north from corner to C east edge
-    B(m, -20, -0.25f, 5.0f, -16, 0, 7.0f, TEX_PLANK);
-    B(m, -20, 0.45f, 4.7f, -16, 0.75f, 5.0f, TEX_PLANK);
-    B(m, -20, 0.45f, 7.0f, -16, 0.75f, 7.3f, TEX_PLANK);
-    // zipline C -> A (fast return)
-    ZipAdd(m, Vec3(-20.5f, 3.5f, 10.0f), Vec3(-8.5f, 1.2f, 2.0f));
-
-    // ---- Spire tower (north): x 8..16, z -30..-22, top y=8 ----
-    DC(m, 8, -40, -30, 16, 7.4f, -22, TEX_BRICK);
-    B(m, 8, 7.4f, -30, 16, 8.0f, -22, TEX_CONCRETE);
-    B(m, 8, 8.0f, -30, 16, 8.9f, -29.6f, TEX_CONCRETE);
-    B(m, 8, 8.0f, -22.4f, 16, 8.9f, -22, TEX_CONCRETE);
-    B(m, 8, 8.0f, -30, 8.4f, 8.9f, -22, TEX_CONCRETE);
-    B(m, 15.6f, 8.0f, -30, 16, 8.9f, -22, TEX_CONCRETE);
-    DC(m, 11.5f, 8.9f, -27.0f, 12.5f, 15.0f, -26.0f, TEX_METAL);
-    // jump pad on tower B roof launches to the spire roof (player-only route)
-    PadAdd(m, 34.0f, 0.0f, -3.0f, -10.0f, 19.0f, -10.0f);
-    // zipline from spire back to A
-    ZipAdd(m, Vec3(12.0f, 9.2f, -22.5f), Vec3(4.0f, 1.5f, 6.5f));
-
-    // ---- Pit tier (y=-8) under the A-C walkway ----
-    DC(m, -22, -48, -14, -8, -8.6f, 0, TEX_BRICK);
-    B(m, -22, -9, -14, -8, -8, 0, TEX_CONCRETE);
-    B(m, -22, -8, -14, -8, -7.1f, -13.6f, TEX_CONCRETE);
-    B(m, -22, -8, 0.4f, -8, -7.1f, 0, TEX_CONCRETE);
-    B(m, -22, -8, -14, -21.6f, -7.1f, 0, TEX_CONCRETE);
-    B(m, -8.4f, -8, -14, -8, -7.1f, 0, TEX_CONCRETE);
-    // stairwell out of the pit: climbs along the east wall (x -10..-8.5),
-    // from the pit floor (y -8) south to z -3.2, exiting beside tower A's roof
-    Stairs(m, -9.25f, -12.0f, 0, 1, 1.5f, 8.0f, 16, TEX_RUST, -8.0f);
-    DC(m, -20.5f, -8, -12.5f, -19.0f, -6.6f, -11.0f, TEX_WOOD);
-    DC(m, -18.5f, -8, -12.2f, -17.0f, -7.0f, -10.7f, TEX_WOOD);
-    PadAdd(m, -18.0f, -8.0f, -12.0f, 0, 16.0f, 0);
-    KillAdd(m, -60, -60, 60, 60, -25.0f);
-
-    WallBuyAdd(m, W_OLYMPIA, -7.4f, 1.4f, -4.0f, 90);
-    WallBuyAdd(m, W_AK74U, 37.4f, 1.4f, 2.0f, 270);
-    WallBuyAdd(m, W_GALIL, -31.4f, 1.4f, 8.0f, 90);
-    WallBuyAdd(m, W_PYTHON, 12.0f, 9.3f, -29.4f, 0);
-    WallBuyAdd(m, W_MP5K, -21.4f, -6.6f, -2.0f, 90);
-    PerkAdd(m, PERK_REVIVE, 6.0f, 0, -6.0f, 180);
-    PerkAdd(m, PERK_SWIFT, 36.0f, 0, 5.0f, 180);
-    PerkAdd(m, PERK_REGEN, -30.0f, 0, 14.0f, 180);
-    PerkAdd(m, PERK_RAPID, 5.5f, 0, 2.5f, 180);
-    PerkAdd(m, PERK_STAMIN, 32.0f, 2.4f, 0.0f, 180);   // tower B deck
-
-    SpawnAdd(m, -13.5f, 6.4f, -1, false, 0);   // corner platform (always)
-    SpawnAdd(m, -26.0f, 15.0f, -1, false, 0);   // tower C (always)
-    SpawnAdd(m, -30.0f, 15.0f, -1, false, 0);
-    SpawnAdd(m, -15.0f, -1.2f, -1, false, -8);  // pit floor (always)
-    SpawnAdd(m, -11.0f, -1.2f, -1, false, -8);
-    SpawnAdd(m, 31.0f, 6.0f, 0, false, 0);      // tower B (behind bridge door)
-    SpawnAdd(m, 25.0f, 6.0f, 0, false, 0);
-    SpawnAdd(m, 36.0f, 6.0f, 0, false, 0);
-}
-
-// ============================================================================
-// MAP 5: DEAD CON 5
-// The White House, upside down. Oval Office at the bottom, a bought elevator
-// ride up to the FBI control room, a second elevator to the FBI floor where
-// the power door stands open and the other doors cost points - including the
-// one that steps outside.
-// ============================================================================
-static void BuildDeadCon5(MapDef *m) {
-    m->name = "Dead Con 5";
-    m->desc = "The Oval Office first. The FBI's secrets are upstairs.";
-    m->difficulty = 4;
-    m->skyTop = (Color){ 14, 16, 26 };
-    m->skyHorizon = (Color){ 70, 60, 72 };
-    m->fogColor = (Color){ 26, 24, 34 };
-    m->fogDensity = 0.010f;
-    m->sunDir = Vec3Norm(Vec3(0.3f, -0.8f, -0.35f));
-    m->sunColor = (Color){ 170, 160, 180 };
-    m->ambient = (Color){ 92, 88, 104 };
-    m->fillDir = Vec3Norm(Vec3(-0.3f, -0.5f, 0.4f));
-    m->fillColor = (Color){ 90, 84, 110 };
-    m->playerStart = Vec3(0, 0, 6);
-    m->playerYaw = 180.0f;
-    m->boxPos = Vec3(7.5f, 0.1f, -1.5f);
-
-    // three floors: F0 Oval (y0), F1 control (y6), F2 FBI (y12).
-    // Wide open stairwells connect everything; slabs leave the stair
-    // shafts cut out so the nav grid links the floors.
-    const float F1 = 6.0f, F2 = 12.0f;
-
-    // ---- F0: Oval Office (x -10..10, z -8..8) ----
-    B(m, -10.5f, -1, -8.5f, 10.5f, 0, 8.5f, TEX_MARBLE);
-    for (int a = 0; a < 16; a++) {
-        float t0 = a/16.0f * 2*PI, t1 = (a+1)/16.0f * 2*PI;
-        float x0 = cosf(t0)*10.0f, z0 = sinf(t0)*8.0f;
-        float x1 = cosf(t1)*10.0f, z1 = sinf(t1)*8.0f;
-        if (z0 < -7.0f && z1 < -7.0f) continue;   // elevator door gap
-        B(m, fminf(x0,x1)-0.35f, 0, fminf(z0,z1)-0.35f, fmaxf(x0,x1)+0.35f, 4.6f, fmaxf(z0,z1)+0.35f, TEX_VELVET);
-    }
-    // desk, rug, sofas, fireplace
-    B(m, -1.6f, 0, -6.4f, 1.6f, 0.78f, -5.2f, TEX_WOOD);
-    DC(m, -6.0f, 0.012f, -5.0f, 6.0f, 0.02f, 5.0f, TEX_VELVET);
-    DC(m, -4.6f, 0, 1.6f, -1.4f, 0.85f, 2.6f, TEX_VELVET);
-    DC(m,  1.4f, 0, 1.6f,  4.6f, 0.85f, 2.6f, TEX_VELVET);
-    DC(m, -1.2f, 0, 1.9f, 1.2f, 0.45f, 2.3f, TEX_WOOD);
-    B(m, -10.1f, 0, -1.6f, -9.0f, 2.6f, 1.6f, TEX_MARBLE);
-
-    // door 0: elevator 1 (north wall)
-    DoorAdd(m, "Elevator to Control Room", 1000, 0, 1.2f, -7.8f);
-    BDoor(m, 0, -1.3f, 0, -8.2f, 1.3f, 2.6f, -7.4f, TEX_METAL);
-
-    // ---- stairwell 1 (x 2..6, z -7..-1): Oval -> F1 ----
-    // switchback: up leg along x 2..4, landing, down-leg none (one run)
-    Stairs(m, 2.5f, -7.0f, 1, 0, 2.0f, 6.0f, 11, TEX_CONCRETE, 0);
-    // F0 ceiling except stairwell cutout + elevator lobby
-    B(m, -10.5f, 4.6f, -8.5f, 2.0f, 5.0f, 8.5f, TEX_MARBLE);
-    B(m, 9.0f, 4.6f, -8.5f, 10.5f, 5.0f, 8.5f, TEX_MARBLE);
-    B(m, 2.0f, 4.6f, -5.5f, 9.0f, 5.0f, 8.5f, TEX_MARBLE);
-
-    // ---- F1: control room (x 2..22, z -12..1, floor 6) ----
-    B(m, 1.8f, 5.0f, -12.4f, 2.0f, 6.0f, 1.4f, TEX_CONCRETE);
-    B(m, 6.0f, 5.0f, -12.4f, 22.4f, 6.0f, 1.4f, TEX_CONCRETE);
-    WallX(m, 1.8f, 22.2f, 1.2f, 5, 0.4f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -12.2f, 1.2f, 2.2f, 5, 0.4f, TEX_CONCRETE, -9.4f, 0.9f);
-    WallZ(m, -7.6f, 1.2f, 2.2f, 5, 0.4f, TEX_CONCRETE, 0, 0);
-    WallX(m, 2.2f, 22.2f, -12.2f, 5, 0.4f, TEX_CONCRETE, 0, 0);
-    WallZ(m, -12.2f, 1.2f, 22.2f, 5, 0.4f, TEX_CONCRETE, 0, 0);
-    // elevator 1 arrival corridor at stairwell top (x 2..6 continues north)
-    WallZ(m, -12.2f, -7.4f, 6.2f, 5, 0.4f, TEX_CONCRETE, -9.4f, 0.9f);
-    // servers + consoles
-    for (int i = 0; i < 4; i++) {
-        float x = 9.0f + i*3.4f;
-        B(m, x, 6.0f, -11.8f, x+1.2f, 8.4f, -10.8f, TEX_METAL);
-    }
-    for (int i = 0; i < 3; i++) {
-        float x = 8.0f + i*4.6f;
-        B(m, x, 6.0f, -6.2f, x+2.4f, 6.75f, -5.0f, TEX_METAL);
-        DC(m, x+0.3f, 6.75f, -6.0f, x+2.1f, 7.15f, -5.2f, TEX_GLASS);
-    }
-
-    // door 1: elevator 2 (east end of control room)
-    DoorAdd(m, "Elevator to FBI Floor", 1250, 21.8f, 7.2f, -6.0f);
-    BDoor(m, 1, 21.9f, 6.0f, -6.6f, 22.6f, 8.6f, -5.4f, TEX_METAL);
-
-    // ---- stairwell 2 (x 8..12, z -12..-6): F1 -> F2 ----
-    Stairs(m, 8.5f, -11.0f, 1, 0, 2.0f, 6.0f, 11, TEX_CONCRETE, 6.0f);
-    // F1 ceiling except stairwell 2 cutout
-    B(m, 1.8f, 10.4f, -5.9f, 22.4f, 10.8f, 1.4f, TEX_CONCRETE);
-    B(m, 1.8f, 10.4f, -12.4f, 8.0f, 10.8f, -5.9f, TEX_CONCRETE);
-    B(m, 15.0f, 10.4f, -12.4f, 22.4f, 10.8f, -5.9f, TEX_CONCRETE);
-
-    // ---- F2: FBI floor (x 2..30, z -12..4, floor 12) ----
-    B(m, 1.8f, 11.4f, -9.8f, 30.4f, 12.0f, 4.4f, TEX_TILE);
-    B(m, 1.8f, 11.4f, -12.4f, 8.0f, 12.0f, -9.8f, TEX_TILE);
-    B(m, 15.0f, 11.4f, -12.4f, 30.4f, 12.0f, -9.8f, TEX_TILE);
-    WallX(m, 1.8f, 30.2f, 4.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    WallZ(m, -12.2f, 4.2f, 2.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    WallX(m, 2.2f, 30.2f, -12.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    WallZ(m, -12.2f, 4.2f, 30.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    B(m, 1.8f, 16.4f, -12.4f, 30.4f, 16.8f, 4.4f, TEX_CONCRETE);
-
-    // power room door: price 0 = open by design
-    DoorAdd(m, "Power Room Door", 0, 24.0f, 13.2f, -6.0f);
-    BDoor(m, 2, 21.6f, 12.0f, -6.6f, 22.4f, 14.6f, -5.4f, TEX_METAL);
-    WallZ(m, -12.2f, -6.6f, 22.2f, 5, 0.4f, TEX_STUCCO, -9.4f, 0.9f);
-    WallZ(m, -5.4f, 4.2f, 22.2f, 5, 0.4f, TEX_STUCCO, -1.0f, 0.9f);
-    WallX(m, 22.2f, 30.2f, -1.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    m->powerPos = Vec3(29.6f, 12.6f, -9.4f);
-    B(m, 27.6f, 12.0f, -11.6f, 29.8f, 13.3f, -10.2f, TEX_RUST);
-
-    // door 3: file room
-    DoorAdd(m, "File Room Door", 1000, 14.0f, 13.2f, -8.0f);
-    BDoor(m, 3, 13.6f, 12.0f, -8.4f, 14.4f, 14.6f, -7.6f, TEX_PLANK);
-    WallZ(m, -12.2f, -8.4f, 12.2f, 5, 0.4f, TEX_STUCCO, -10.2f, 0.9f);
-    WallZ(m, -7.6f, -1.2f, 12.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    WallX(m, 12.2f, 20.2f, -1.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    for (int i = 0; i < 3; i++)
-        B(m, 13.0f + i*2.2f, 12.0f, -11.8f, 14.0f + i*2.2f, 14.2f, -11.0f, TEX_WOOD);
-
-    // door 4: interrogation room
-    DoorAdd(m, "Interrogation Room Door", 1000, 26.0f, 13.2f, 2.0f);
-    BDoor(m, 4, 25.6f, 12.0f, 1.6f, 26.4f, 14.6f, 2.4f, TEX_PLANK);
-    WallZ(m, -1.2f, 1.6f, 24.2f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    WallX(m, 24.2f, 30.2f, 4.0f, 5, 0.4f, TEX_STUCCO, 0, 0);
-    B(m, 26.8f, 12.0f, 1.2f, 29.0f, 12.75f, 2.4f, TEX_METAL);
-
-    // door 5: outside door (south wall)
-    DoorAdd(m, "Outside Door", 1250, 16.0f, 13.2f, 4.0f);
-    BDoor(m, 5, 15.6f, 12.0f, 4.2f, 16.4f, 14.6f, 4.4f, TEX_PLANK);
-    // balcony strip
-    B(m, 1.8f, 10.8f, 4.4f, 30.4f, 11.4f, 8.4f, TEX_ASPHALT);
-    WallX(m, 1.8f, 30.2f, 8.2f, 1.2f, 0.3f, TEX_METAL, 0, 0);
-    KillAdd(m, -60, -60, 60, 60, 6.0f);
-
-    // wall buys / perks / box / PaP
-    WallBuyAdd(m, W_M1911, -9.4f, 1.5f, 5.4f, 90);
-    WallBuyAdd(m, W_CZ75, 8.0f, 7.5f, -5.6f, 0);
-    WallBuyAdd(m, W_MP5K, 13.6f, 13.5f, -8.0f, 0);
-    WallBuyAdd(m, W_AK74U, 25.8f, 13.5f, 2.0f, 0);
-    WallBuyAdd(m, W_M16, 26.0f, 13.5f, -6.0f, 0);
-    WallBuyAdd(m, W_STAKEOUT, 15.6f, 13.5f, 4.2f, 270);
-    PerkAdd(m, PERK_REVIVE, 8.6f, 6.0f, -2.4f, 180);
-    PerkAdd(m, PERK_JUGG, 19.6f, 12.0f, -10.6f, 0);
-    PerkAdd(m, PERK_SWIFT, 27.6f, 12.0f, 0.4f, 180);
-    PerkAdd(m, PERK_REGEN, 28.6f, 12.0f, -4.4f, 180);
-    PerkAdd(m, PERK_RAPID, 4.4f, 12.0f, -2.4f, 180);
-    PerkAdd(m, PERK_STAMIN, 17.0f, 11.4f, 6.4f, 0);
-    m->papPos = Vec3(6.4f, 12.0f, -10.4f);
-
-    // spawns
-    SpawnAdd(m, 6.6f, 6.6f, -1, false, 0);
-    SpawnAdd(m, -6.6f, 6.6f, -1, false, 0);
-    SpawnAdd(m, 0, -6.6f, -1, false, 0);
-    SpawnAdd(m, 16.0f, -2.0f, 0, false, 6);
-    SpawnAdd(m, 12.0f, -10.0f, 0, false, 6);
-    SpawnAdd(m, 20.0f, 2.0f, 1, false, 12);
-    SpawnAdd(m, 16.0f, 2.0f, 1, false, 12);
-    SpawnAdd(m, 24.0f, 2.0f, 1, false, 12);
-    SpawnAdd(m, 15.0f, -3.0f, 1, false, 12);
-    SpawnAdd(m, 27.0f, -9.0f, 1, false, 12);
-    SpawnAdd(m, 13.0f, -10.0f, 3, false, 12);
-    SpawnAdd(m, 28.0f, 2.5f, 4, false, 12);
-}
-
-// ============================================================================
-// Map loading
-// ============================================================================
-static MapDef sMaps[MAP_COUNT];
 
 void MapLoad(MapId id) {
-    MapDef *m = &sMaps[id];
+    MapDef *m = &g.map;
     memset(m, 0, sizeof(MapDef));
-    switch (id) {
-        case MAP_THEATER:   BuildTheater(m);   break;
-        case MAP_BUNKER:    BuildBunker(m);    break;
-        case MAP_GRAVEYARD: BuildGraveyard(m); break;
-        case MAP_DIE_ARISE: BuildDieArise(m);  break;
-        case MAP_DEAD_CON_5: BuildDeadCon5(m); break;
-        default: break;
-    }
-    g.map = *m;
+    m->mapIndex = id;
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", DataDir(), gMaps[id].file);
+    char *text = JsonReadFile(path);
+    JsonNode *j = text ? JsonParse(text) : NULL;
+    if (j) MapApplyJson(m, j);
+    else BuildFallbackMap(m);
+    if (text) free(text);
     g.powerOn = m->powerAtStart;
     // doors priced 0 are open-by-design (e.g. Dead Con 5 power room door)
     for (int i = 0; i < m->doorCount; i++)
         if (m->doors[i].price == 0) m->doorOpen[i] = true;
-    Gfx_MB_Reset();
-    for (int i = 0; i < g.map.boxCount; i++) {
-        if (g.map.boxes[i].doorId != 0) continue;
-        Gfx_MB_Box(g.map.boxes[i].tex, g.map.boxes[i].aabb, 2.0f);
+    // static mesh upload needs GL; the windowless selftest only validates
+    if (IsWindowReady()) {
+        Gfx_MB_Reset();
+        for (int i = 0; i < g.map.boxCount; i++) {
+            if (g.map.boxes[i].doorId != 0) continue;
+            Gfx_MB_Box(g.map.boxes[i].tex, g.map.boxes[i].aabb, 2.0f);
+        }
+        Gfx_MB_Build();
     }
-    Gfx_MB_Build();
     NavRebuild();
 }
 
@@ -1239,36 +650,26 @@ bool NavWalkableLine(Vector3 a, Vector3 b) {
 // ============================================================================
 // Selftest validation
 // ============================================================================
+bool MapSelftestFallback(void);   // defined in main.c: fallback data mode
+
 bool MapValidate(MapId id, char *err, int errSize) {
     MapDef saved = g.map;
-    MapDef *m = &sMaps[id];
-    memset(m, 0, sizeof(MapDef));
-    switch (id) {
-        case MAP_THEATER:   BuildTheater(m);   break;
-        case MAP_BUNKER:    BuildBunker(m);    break;
-        case MAP_GRAVEYARD: BuildGraveyard(m); break;
-        case MAP_DIE_ARISE: BuildDieArise(m);  break;
-        case MAP_DEAD_CON_5: BuildDeadCon5(m); break;
-        default: break;
-    }
-    g.map = *m;
+    MapLoad(id);
+    MapDef *m = &g.map;
     #define FAIL(...) do { snprintf(err, errSize, __VA_ARGS__); g.map = saved; return false; } while (0)
     if (m->boxCount == 0) FAIL("no boxes");
     if (m->spawnCount == 0) FAIL("no spawns");
     if (m->doorCount == 0) FAIL("no doors");
     if (m->perkCount < 5) FAIL("needs 5 perk stations");
-    if (m->wallbuyCount < 4) FAIL("needs >=4 wall buys");
+    if (m->wallbuyCount < (MapSelftestFallback() ? 2 : 4)) FAIL("needs >=4 wall buys");
     float gy = GroundHeightAt(m->playerStart.x, m->playerStart.z, m->playerStart.y + 0.6f);
     if (gy < -50) FAIL("player start has no ground");
     if (fabsf(gy - m->playerStart.y) > 2.0f) FAIL("player start ground mismatch (gy=%.2f)", gy);
-    Vector3 path[48]; int pathLen = 0;
     for (int i = 0; i < m->spawnCount; i++) {
         float sy = GroundHeightAt(m->spawns[i].pos.x, m->spawns[i].pos.z, m->spawns[i].pos.y + 0.6f);
         if (sy < -50 || fabsf(sy - m->spawns[i].pos.y) > 2.5f)
             sy = GroundHeightAt(m->spawns[i].pos.x, m->spawns[i].pos.z, m->spawns[i].pos.y + 6.0f);
         if (sy < -50) FAIL("spawn %d floats", i);
-        // spawn must sit on a walkable nav surface (inside map bounds,
-        // headroom present) in at least one direction
         Vector3 a = Vec3(m->spawns[i].pos.x, sy, m->spawns[i].pos.z);
         bool walk = NavWalkableLine(a, Vec3(a.x + 0.9f, sy, a.z)) ||
                     NavWalkableLine(a, Vec3(a.x - 0.9f, sy, a.z)) ||
@@ -1282,26 +683,22 @@ bool MapValidate(MapId id, char *err, int errSize) {
     // multi-floor maps reliably (BFS start-level ambiguity), so it is not
     // part of the selftest here.
     for (int i = 0; i < m->wallbuyCount; i++)
-        if (m->wallbuys[i].widx < 0 || m->wallbuys[i].widx >= GUN_COUNT_TOTAL) FAIL("wallbuy %d bad weapon", i);
+        if (m->wallbuys[i].widx < 0 || m->wallbuys[i].widx >= gGunCount) FAIL("wallbuy %d bad weapon", i);
     float by = GroundHeightAt(m->boxPos.x, m->boxPos.z, m->boxPos.y + 6.0f);
     if (by < -50) FAIL("mystery box floats");
-    // NOTE: the old start->spawn0 nav check is unreliable on multi-floor
-    // maps (BFS start-level ambiguity with ceilings as sampled tops);
-    // per-spawn reachability is enforced at runtime instead.
     g.map = saved;
     if (err) err[0] = 0;
     return true;
     #undef FAIL
 }
 
-// ============================================================================
 // 3D interactable props: perk machines, wall-buy chalks, ziplines, jump pads
 // ============================================================================
 void MapDrawInteractables(void) {
     // perk machines (vending-machine boxes in the perk color)
     for (int i = 0; i < g.map.perkCount; i++) {
         PerkStation *ps = &g.map.perks[i];
-        Color pc = PERKS[ps->type].color;
+        Color pc = gPerks[ps->perkType].color;
         Vector3 b = ps->pos;
         GfxDrawBox(AABB_Make(Vec3(b.x-0.45f, b.y, b.z-0.28f), Vec3(b.x+0.45f, b.y+1.85f, b.z+0.28f)),
                    TEX_METAL, (Color){ (unsigned char)(pc.r*3/4), (unsigned char)(pc.g*3/4), (unsigned char)(pc.b*3/4), 255 });

@@ -133,7 +133,7 @@ void HudDrawGameplay(void) {
     int w = GetScreenWidth(), h = GetScreenHeight();
 
     // crosshair (spread)
-    if (!p->downed && WeaponCurrentIndex() >= 0 && WEAPONS[WeaponCurrentIndex()].mode != FIRE_MELEE) {
+    if (!p->downed && WeaponCurrentIndex() >= 0 && gWeapons[WeaponCurrentIndex()].mode != FIRE_MELEE) {
         int cx = w/2, cy = h/2;
         float spread = WeaponSpreadCurrent();
         int gap = (int)(6 + spread * 700);
@@ -166,9 +166,9 @@ void HudDrawGameplay(void) {
 
     // perk icons (soda bottles as colored diamonds)
     int px0 = hx;
-    for (int i = 0; i < PERK_COUNT; i++) {
+    for (int i = 0; i < gPerkCount; i++) {
         if (!p->perks[i]) continue;
-        Color pc = PERKS[i].color;
+        Color pc = gPerks[i].color;
         Vector2 c = { px0 + 14.0f, (float)(hy + 40) };
         DrawTriangle((Vector2){c.x, c.y-12}, (Vector2){c.x+12, c.y}, (Vector2){c.x, c.y+12}, pc);
         DrawTriangle((Vector2){c.x, c.y-12}, (Vector2){c.x-12, c.y}, (Vector2){c.x, c.y+12}, Fade(pc, 0.7f));
@@ -182,8 +182,8 @@ void HudDrawGameplay(void) {
         T(bt, w/2 - 20, 120, 30, (Color){255, 120, 100, 255}, true);
     }
     // regen hint when waiting
-    if (p->perks[PERK_REGEN] && p->hp < PLAYER_MAX_HP && !p->downed) {
-        float wait = REGEN_DELAY - ((float)g.time - p->lastHitTime);
+    if (PlayerHasPerk(PerkRegenIndex()) && p->hp < PLAYER_MAX_HP && !p->downed) {
+        float wait = gGameplay.regenDelay - ((float)g.time - p->lastHitTime);
         if (wait > 0) {
             char rt[48];
             snprintf(rt, sizeof rt, "Regen in %.0f", wait);
@@ -194,7 +194,7 @@ void HudDrawGameplay(void) {
     // ---- bottom right: ammo ----
     WeaponSlot *s = &p->weapons[p->curSlot];
     if (s->widx >= 0) {
-        const WeaponDef *wd = &WEAPONS[s->widx];
+        const WeaponDef *wd = &gWeapons[s->widx];
         char ammo[64];
         if (wd->mode == FIRE_MELEE) snprintf(ammo, sizeof ammo, "KNIFE");
         else snprintf(ammo, sizeof ammo, "%d / %d", s->magAmmo, s->reserveAmmo);
@@ -256,10 +256,28 @@ void HudDrawGameplay(void) {
     if (g.roundBannerTime > 0 && g.roundBannerActive) {
         float a = CLAMP(g.roundBannerTime / 3.0f, 0, 1);
         char bt[64];
-        snprintf(bt, sizeof bt, "- ROUND %d -", g.round);
+        if (g.dogRound) snprintf(bt, sizeof bt, "- FETCH THEM THEIR SOULS -");
+        else snprintf(bt, sizeof bt, "- ROUND %d -", g.round);
         int bw = MeasureText(bt, 52);
         Color bc = (Color){220, 45, 35, (unsigned char)(255 * sinf(a * PI))};
         T(bt, w/2 - bw/2, h*0.30f, 52, bc, true);
+    }
+
+    // ---- dog round warning ----
+    if (g.dogWarnTimer > 0 || g.dogRound) {
+        float pulse = 0.5f + 0.5f * sinf((float)g.time * 6.0f);
+        if (g.dogWarnTimer > 0) {
+            const char *dw = "HELLHOUNDS INCOMING";
+            T(dw, w/2 - MeasureText(dw, 34)/2, (int)(h*0.30f), 34,
+              (Color){255, 80, 40, (unsigned char)(180 + 70*pulse)}, true);
+        }
+        DrawRectangle(0, 0, w, h, (Color){120, 10, 6, (unsigned char)(26 + 18*pulse)});
+    }
+    // max ammo pickup flash
+    if (g.dropPickupFlash > 0) {
+        const char *ma = "MAX AMMO";
+        T(ma, w/2 - MeasureText(ma, 40)/2, (int)(h*0.24f), 40,
+          (Color){140, 230, 255, (unsigned char)(255 * CLAMP(g.dropPickupFlash, 0, 1))}, true);
     }
 
     // ---- damage vignette ----
@@ -276,15 +294,6 @@ void HudDrawGameplay(void) {
 // ---------------------------------------------------------------------------
 // Menus
 // ---------------------------------------------------------------------------
-static const char *MAP_NAMES[MAP_COUNT] = { "The Grand Theater", "Bunker 44", "Graveyard Hollow", "Die Arise", "Dead Con 5" };
-static const char *MAP_DESCS[MAP_COUNT] = {
-    "The curtain rose on the end of the world. Hold the stage.",
-    "Holding position in the ruins of the final offensive.",
-    "The dead were never resting. The church is your only refuge.",
-    "The city is gone. Only the rooftops remain - and they go up.",
-    "The Oval Office first. The FBI's secrets are upstairs.",
-};
-
 void HudDrawTitle(void) {
     int w = GetScreenWidth(), h = GetScreenHeight();
     // backdrop
@@ -335,7 +344,7 @@ void HudDrawMapSelect(void) {
     T("SELECT MAP", w/2 - MeasureText("SELECT MAP", 44)/2, 40, 44, (Color){225, 60, 45, 255}, true);
 
     float bx = w/2 - 330;
-    for (int i = 0; i < MAP_COUNT; i++) {
+    for (int i = 0; i < gMapCount; i++) {
         Rectangle r = { bx, 118.0f + i * 96, 660, 86 };
         bool hover = CheckCollisionPointRec(GetMousePosition(), r);
         bool locked = false;
@@ -343,11 +352,11 @@ void HudDrawMapSelect(void) {
         Color border = hover ? (Color){230, 70, 55, 255} : (Color){110, 35, 32, 255};
         DrawRectangleRec(r, hover ? (Color){45, 16, 15, 240} : (Color){28, 10, 10, 220});
         DrawRectangleLinesEx(r, 2, border);
-        T(MAP_NAMES[i], r.x + 24, r.y + 12, 28, locked ? GRAY : RAYWHITE, false);
-        T(MAP_DESCS[i], r.x + 24, r.y + 48, 18, (Color){200, 190, 185, 220}, false);
-        // difficulty skulls
+        T(gMaps[i].name, r.x + 24, r.y + 12, 28, locked ? GRAY : RAYWHITE, false);
+        T(gMaps[i].desc, r.x + 24, r.y + 48, 18, (Color){200, 190, 185, 220}, false);
+        // difficulty skulls (registry-driven)
         for (int d = 0; d < 5; d++) {
-            Color dc = d < (i + 2) ? (Color){230, 60, 45, 255} : (Color){70, 40, 38, 255};
+            Color dc = d < gMaps[i].difficulty ? (Color){230, 60, 45, 255} : (Color){70, 40, 38, 255};
             DrawCircle(r.x + 480 + d*26, r.y + 28, 8, dc);
         }
         char best[40];
@@ -358,15 +367,45 @@ void HudDrawMapSelect(void) {
             GameStart((MapId)i);
         }
     }
-    // hard mode toggle under the list
-    Rectangle hm = { w/2.0f - 160, 118.0f + MAP_COUNT * 96 + 10, 320, 44 };
+    // hard mode + gun skin selector under the list
+    float y0 = 118.0f + gMapCount * 96 + 10;
+    Rectangle hm = { w/2.0f - 330, y0, 320, 44 };
     if (UiToggle(hm, g.hardMode, g.hardMode ? "HARD MODE: ON" : "HARD MODE: OFF", 22)) {
         g.hardMode = !g.hardMode;
         SfxPlay(SND_BUY, g.hardMode ? 0.8f : 1.1f, 0.6f);
     }
+    // skin cycler: click arrows to change the equipped gun skin (saved)
+    Rectangle sk = { w/2.0f + 10, y0, 320, 44 };
+    {
+        bool hov = CheckCollisionPointRec(GetMousePosition(), sk);
+        DrawRectangleRec(sk, hov ? (Color){45, 16, 15, 240} : (Color){28, 10, 10, 220});
+        DrawRectangleLinesEx(sk, 2, hov ? (Color){230, 70, 55, 255} : (Color){110, 35, 32, 255});
+        const SkinDef *s = SkinCurrent();
+        char skLbl[64];
+        snprintf(skLbl, sizeof skLbl, "SKIN: %s", s->name);
+        T(skLbl, (int)(sk.x + 64), (int)(sk.y + 12), 20, RAYWHITE, false);
+        // color swatch of the skin
+        DrawRectangle((int)(sk.x + 16), (int)(sk.y + 12), 20, 20, s->body);
+        DrawRectangle((int)(sk.x + 16), (int)(sk.y + 12), 20, 10, s->accent);
+        // arrows
+        bool hovL = CheckCollisionPointRec(GetMousePosition(), (Rectangle){ sk.x, sk.y, 40, 44 });
+        bool hovR = CheckCollisionPointRec(GetMousePosition(), (Rectangle){ sk.x + sk.width - 40, sk.y, 40, 44 });
+        T("<", (int)(sk.x + 14), (int)(sk.y + 10), 24, hovL ? RAYWHITE : (Color){190, 130, 120, 255}, true);
+        T(">", (int)(sk.x + sk.width - 20), (int)(sk.y + 10), 24, hovR ? RAYWHITE : (Color){190, 130, 120, 255}, true);
+        if (hovL && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            gSkinSel = (gSkinSel + gSkinCount - 1) % gSkinCount;
+            SaveSettings();
+            SfxPlay(SND_BUY, 1.15f, 0.5f);
+        }
+        if (hovR && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            gSkinSel = (gSkinSel + 1) % gSkinCount;
+            SaveSettings();
+            SfxPlay(SND_BUY, 1.25f, 0.5f);
+        }
+    }
     if (g.hardMode) {
         const char *hd = "Darker. Your flashlight only works while you keep shaking it.";
-        T(hd, w/2 - MeasureText(hd, 17)/2, (int)(hm.y + hm.height + 8), 17, (Color){235, 170, 120, 220}, false);
+        T(hd, w/2 - MeasureText(hd, 17)/2, (int)(y0 + 54), 17, (Color){235, 170, 120, 220}, false);
     }
     T("ESC to go back", 20, h - 30, 18, (Color){160, 150, 150, 200}, false);
 }

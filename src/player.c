@@ -16,9 +16,11 @@ void PlayerSpawn(void) {
     p->hp = PLAYER_MAX_HP;
     p->points = POINTS_START;
     p->curSlot = 0;
-    p->weapons[0] = (WeaponSlot){ W_M1911, WEAPONS[W_M1911].mag, WEAPONS[W_M1911].reserve };
+    int m1911 = GunIndex("m1911");
+    if (m1911 < 0) m1911 = 0;   // first gun as fallback
+    p->weapons[0] = (WeaponSlot){ m1911, gWeapons[m1911].mag, gWeapons[m1911].reserve };
     p->weapons[1] = (WeaponSlot){ -1, 0, 0 };
-    p->weapons[2] = (WeaponSlot){ W_KNIFE, 0, 0 };
+    p->weapons[2] = (WeaponSlot){ GunKnifeIndex(), 0, 0 };
     p->raiseTimer = 0.4f;
 }
 
@@ -34,19 +36,21 @@ void PlayerDamage(float dmg) {
     // perk's limit. ZOMBIE_HIT_DMG 50 vs 100 hp = 2 hits normally; Jugg
     // effectively makes it 4. The perk is consumed on the saves it provides
     // and re-buys like the others; hits reset after 10 s without one.
-    if (p->hp <= 0 && p->perks[PERK_JUGG]) {
+    int jugg = PerkJuggIndex();
+    if (p->hp <= 0 && p->perks[jugg]) {
         p->hp = 1.0f;
-        p->perks[PERK_JUGG] = false;
+        p->perks[jugg] = false;
         g.roundBannerTime = 1.6f;
         g.roundBannerActive = true;
         SfxPlay(SND_PERK, 0.7f, 1.0f);
-        ParticlesBurst(Vec3(p->pos.x, p->pos.y+1, p->pos.z), 18, PERKS[PERK_JUGG].color, 3.0f, 0.12f, 0.9f, false);
+        ParticlesBurst(Vec3(p->pos.x, p->pos.y+1, p->pos.z), 18, gPerks[jugg].color, 3.0f, 0.12f, 0.9f, false);
     }
     if (p->hp <= 0) {
         p->hp = 0;
-        if (p->perks[PERK_REVIVE] && p->reviveUsedRound != g.round) {
+        int revive = PerkReviveIndex();
+        if (p->perks[revive] && p->reviveUsedRound != g.round) {
             // Self Revive: consumed, get back up
-            p->perks[PERK_REVIVE] = false;
+            p->perks[revive] = false;
             p->reviveUsedRound = g.round;
             p->hp = PLAYER_MAX_HP;
             p->downTimer = 0;
@@ -54,7 +58,7 @@ void PlayerDamage(float dmg) {
             g.roundBannerActive = true;
             p->revives++;
             SfxPlay(SND_PERK, 1.0f, 1.0f);
-            ParticlesBurst(Vec3(p->pos.x, p->pos.y+1, p->pos.z), 24, PERKS[PERK_REVIVE].color, 3.0f, 0.12f, 1.0f, false);
+            ParticlesBurst(Vec3(p->pos.x, p->pos.y+1, p->pos.z), 24, gPerks[revive].color, 3.0f, 0.12f, 1.0f, false);
         } else {
             p->downed = true;
             p->downTimer = BLEEDOUT_TIME;
@@ -63,7 +67,7 @@ void PlayerDamage(float dmg) {
     }
 }
 
-bool PlayerHasPerk(PerkType t) { return g.player.perks[t]; }
+bool PlayerHasPerk(int t) { return t >= 0 && t < PERK_SLOTS_MAX && g.player.perks[t]; }
 
 void AddPoints(int n) {
     g.player.points += n;
@@ -180,7 +184,7 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
         }
     } else if (best == IA_WALLBUY && label) {
         int widx = g.map.wallbuys[bestIdx].widx;
-        const WeaponDef *w = &WEAPONS[widx];
+        const WeaponDef *w = &gWeapons[widx];
         bool owned = (p->weapons[0].widx == widx) || (p->weapons[1].widx == widx);
         if (owned) {
             int ammoPrice = w->wallPrice / 2;
@@ -208,8 +212,8 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
             }
         }
     } else if (best == IA_PERK && label) {
-        PerkType t = g.map.perks[bestIdx].type;
-        const PerkDef *pd = &PERKS[t];
+        int t = g.map.perks[bestIdx].perkType;
+        const PerkDef *pd = &gPerks[t];
         if (p->perks[t]) {
             snprintf(label, labelSize, "%s - owned", pd->name);
         } else if (!g.powerOn) {
@@ -235,19 +239,19 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
         }
     } else if (best == IA_PAP && label) {
         int cw = p->weapons[p->curSlot].widx;
-        if (cw < 0 || WEAPONS[cw].mode == FIRE_MELEE) {
+        if (cw < 0 || gWeapons[cw].mode == FIRE_MELEE) {
             snprintf(label, labelSize, "Pack-a-Punch: hold a gun");
         } else if (p->weapons[p->curSlot].upgraded) {
-            snprintf(label, labelSize, "%s - already upgraded", WEAPONS[cw].name);
+            snprintf(label, labelSize, "%s - already upgraded", gWeapons[cw].name);
         } else {
-            snprintf(label, labelSize, "[E] Pack-a-Punch %s (%d)", WEAPONS[cw].name, PAP_PRICE);
+            snprintf(label, labelSize, "[E] Pack-a-Punch %s (%d)", gWeapons[cw].name, PAP_PRICE);
             if (doIt) {
                 if (p->points >= PAP_PRICE) {
                     p->points -= PAP_PRICE;
                     p->weapons[p->curSlot].upgraded = true;
                     // free refill with the upgrade
-                    p->weapons[p->curSlot].magAmmo = WEAPONS[cw].mag;
-                    p->weapons[p->curSlot].reserveAmmo = WEAPONS[cw].reserve;
+                    p->weapons[p->curSlot].magAmmo = gWeapons[cw].mag;
+                    p->weapons[p->curSlot].reserveAmmo = gWeapons[cw].reserve;
                     p->reloadTimer = 0;
                     g.papAnim = 2.0f;
                     SfxPlay(SND_BOX_WIN, 1.0f, 1.0f);
@@ -256,7 +260,7 @@ static InteractType ScanInteract(char *label, int labelSize, int *idxOut, bool d
         }
     } else if (best == IA_BOX && label) {
         if (g.boxInUse) {
-            if (g.boxResultWeapon >= 0) snprintf(label, labelSize, "[E] Take %s", WEAPONS[g.boxResultWeapon].name);
+            if (g.boxResultWeapon >= 0) snprintf(label, labelSize, "[E] Take %s", gWeapons[g.boxResultWeapon].name);
             else snprintf(label, labelSize, "The box is stirring...");
         }
         else snprintf(label, labelSize, "[E] Mystery Box (%d)", BOX_PRICE);
@@ -319,7 +323,7 @@ void PlayerUpdate(void) {
     float speed = crouched ? PLAYER_CRAWL : (sprinting ? PLAYER_SPRINT : PLAYER_WALK);
     // downed-not-possible here; reload slows slightly
     if (p->reloadTimer > 0) speed *= 0.85f;
-    if (p->perks[PERK_STAMIN]) speed *= (sprinting ? 1.16f : 1.08f);
+    if (PlayerHasPerk(PerkStaminIndex())) speed *= (sprinting ? 1.16f : 1.08f);
 
     if (moving) {
         p->vel.x = wish.x * speed;
@@ -389,9 +393,9 @@ void PlayerUpdate(void) {
     }
 
     // ---- regen perk ----
-    if (p->perks[PERK_REGEN] && p->hp < PLAYER_MAX_HP && !p->downed) {
-        if ((float)g.time - p->lastHitTime > REGEN_DELAY) {
-            p->hp += REGEN_RATE * (float)g.dt;
+    if (PlayerHasPerk(PerkRegenIndex()) && p->hp < PLAYER_MAX_HP && !p->downed) {
+        if ((float)g.time - p->lastHitTime > gGameplay.regenDelay) {
+            p->hp += gGameplay.regenRate * (float)g.dt;
             if (p->hp > PLAYER_MAX_HP) p->hp = PLAYER_MAX_HP;
         }
     }

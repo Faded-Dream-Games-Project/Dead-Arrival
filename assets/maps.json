@@ -1,0 +1,7 @@
+[
+  { "file": "theater",   "name": "The Grand Theater", "desc": "The curtain rose on the end of the world. Hold the stage.", "difficulty": 2 },
+  { "file": "bunker",    "name": "Bunker 44",         "desc": "Holding position in the ruins of the final offensive.",     "difficulty": 3 },
+  { "file": "graveyard", "name": "Graveyard Hollow",  "desc": "The dead were already here. Now they're awake.",            "difficulty": 3 },
+  { "file": "diearise",  "name": "Die Arise",         "desc": "The rooftops of a dead city. Mind the gap.",                "difficulty": 4 },
+  { "file": "deadcon5",  "name": "Dead Con 5",        "desc": "The Oval Office first. The FBI's secrets are upstairs.",    "difficulty": 4 }
+]

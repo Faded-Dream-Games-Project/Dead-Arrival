@@ -1,0 +1,45 @@
+{
+  "pointsStart": 500,
+  "pointsPerHit": 10,
+  "pointsPerKill": 50,
+  "boxPrice": 950,
+  "papPrice": 5000,
+  "papDamageMul": 2.5,
+  "zombieHitDmg": 50,
+  "regenDelay": 10,
+  "regenRate": 25,
+
+  "zombieHealth": {
+    "base": 100,
+    "round2": 200,
+    "linearPerRound": 100,
+    "linearUntil": 9,
+    "growthPerRound": 1.15
+  },
+  "zombieSpeed": {
+    "base": 0.95,
+    "perRound": 0.055,
+    "min": 0.9,
+    "max": 2.6
+  },
+  "runnerChanceBase": 4,
+  "runnerFromRound": 5,
+  "zombieQuota": {
+    "base": 6,
+    "growth": 1.22,
+    "cap": 120
+  },
+
+  "hellhounds": {
+    "every": 5,
+    "firstRound": 5,
+    "hp": 260,
+    "speed": 4.6,
+    "quotaMin": 6,
+    "quotaMax": 12
+  },
+  "maxAmmoDrop": {
+    "chancePercent": 3,
+    "lifeSeconds": 30
+  }
+}

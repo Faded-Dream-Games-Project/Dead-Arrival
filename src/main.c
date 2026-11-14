@@ -4,6 +4,7 @@
 //  settings/score persistence, --selftest and --smoke modes.
 // ============================================================================
 #include "game.h"
+#include "json.h"
 
 Game g;
 
@@ -48,6 +49,7 @@ void SaveSettings(void) {
     FILE *f = fopen("settings.cfg", "w");
     if (!f) return;
     fprintf(f, "sens %.3f\n", g.sens);
+    fprintf(f, "skin %d\n", gSkinSel);
     fprintf(f, "volMaster %.3f\nvolMusic %.3f\nvolSfx %.3f\n", g.volMaster, g.volMusic, g.volSfx);
     fprintf(f, "brightness %.3f\n", g.brightness);
     fprintf(f, "fov %.1f\n", g.fovSetting);
@@ -74,6 +76,7 @@ void LoadSettings(void) {
         else if (!strcmp(key, "fullscreen")) { int v; if (fscanf(f, "%d", &v) == 1) g.fullscreen = v != 0; }
         else if (!strcmp(key, "vsync"))      { int v; if (fscanf(f, "%d", &v) == 1) g.vsync = v != 0; }
         else if (!strcmp(key, "shakeMouse")) { int v; if (fscanf(f, "%d", &v) == 1) g.shakeByMouse = v != 0; }
+        else if (!strcmp(key, "skin"))       { int v; if (fscanf(f, "%d", &v) == 1 && v >= 0 && v < SKIN_SLOTS_MAX) gSkinSel = v; }
         else if (!strcmp(key, "key"))        {
             int idx, code;
             if (fscanf(f, "%d %d", &idx, &code) == 2 &&
@@ -91,13 +94,13 @@ void LoadSettings(void) {
 void SaveScores(void) {
     FILE *f = fopen("scores.cfg", "w");
     if (!f) return;
-    for (int i = 0; i < MAP_COUNT; i++) fprintf(f, "%d\n", g.bestRound[i]);
+    for (int i = 0; i < gMapCount; i++) fprintf(f, "%d\n", g.bestRound[i]);
     fclose(f);
 }
 void LoadScores(void) {
     FILE *f = fopen("scores.cfg", "r");
     if (!f) return;
-    for (int i = 0; i < MAP_COUNT; i++)
+    for (int i = 0; i < MAP_SLOTS_MAX; i++)
         if (fscanf(f, "%d", &g.bestRound[i]) != 1) g.bestRound[i] = 0;
     fclose(f);
 }
@@ -123,6 +126,10 @@ void GameReset(void) {
     g.ziplineT = 0;
     g.roundBannerActive = false;
     g.roundBannerTime = 0;
+    g.dogRound = false;
+    g.dogWarnTimer = 0;
+    memset(g.drops, 0, sizeof(g.drops));
+    g.dropPickupFlash = 0;
     SeedRng((uint32_t)(GetTime() * 1000) | 1);
 }
 
@@ -256,7 +263,7 @@ static Camera3D BuildCamera(void) {
     cam.up = Vec3(0, 1, 0);
     // FOV: setting + ADS zoom
     int widx = p->weapons[p->curSlot].widx;
-    float adsFov = (widx >= 0 && WEAPONS[widx].adsFov > 0) ? WEAPONS[widx].adsFov : 55.0f;
+    float adsFov = (widx >= 0 && gWeapons[widx].adsFov > 0) ? gWeapons[widx].adsFov : 55.0f;
     float targetFov = LERP(g.fovSetting, adsFov, p->adsBlend);
     g.fovCur = LERP(g.fovCur, targetFov, (float)fmin(g.dt * 10.0, 1.0));
     cam.fovy = g.fovCur;
@@ -267,11 +274,15 @@ static Camera3D BuildCamera(void) {
 // ---------------------------------------------------------------------------
 // Selftest: validate all maps, weapons table sanity, no window needed
 // ---------------------------------------------------------------------------
+static bool sSelftestFallback = false;   // --selftest-fallback: skip data-presence checks
+bool MapSelftestFallback(void) { return sSelftestFallback; }
+
 static int RunSelftest(void) {
     int fails = 0;
-    // weapon table
-    for (int i = 0; i < GUN_COUNT_TOTAL; i++) {
-        const WeaponDef *w = &WEAPONS[i];
+    // weapon table (dynamic, from guns.json or fallback)
+    int knifeIdx = GunKnifeIndex();
+    for (int i = 0; i < gGunCount; i++) {
+        const WeaponDef *w = &gWeapons[i];
         if (!w->name || !w->name[0]) { printf("FAIL weapon %d has no name\n", i); fails++; }
         if (w->damage <= 0) { printf("FAIL weapon %s damage %d\n", w->name, w->damage); fails++; }
         if (w->mode != FIRE_MELEE && w->mag <= 0) { printf("FAIL weapon %s mag %d\n", w->name, w->mag); fails++; }
@@ -279,31 +290,105 @@ static int RunSelftest(void) {
     }
     // knife rule: 150 dmg >= R1 hp (100), < 2*150 >= R2 hp (150) => 2 hits R2
     float r1 = ZombieHpForRound(1), r2 = ZombieHpForRound(2), r10 = ZombieHpForRound(10), r15 = ZombieHpForRound(15);
-    printf("zombie HP: R1=%.0f R2=%.0f R10=%.0f R15=%.0f | knife=150\n", r1, r2, r10, r15);
-    if (r1 > WEAPONS[W_KNIFE].damage) { printf("FAIL knife not 1-hit on R1\n"); fails++; }
-    if (r2 <= WEAPONS[W_KNIFE].damage) { printf("FAIL knife 1-hits R2 (needs 2)\n"); fails++; }
-    if (r2 > WEAPONS[W_KNIFE].damage * 2) { printf("FAIL knife needs >2 hits on R2\n"); fails++; }
+    printf("zombie HP: R1=%.0f R2=%.0f R10=%.0f R15=%.0f | knife=%d\n", r1, r2, r10, r15, gWeapons[knifeIdx].damage);
+    if (!sSelftestFallback) {
+        if (r1 > gWeapons[knifeIdx].damage) { printf("FAIL knife not 1-hit on R1\n"); fails++; }
+        if (r2 <= gWeapons[knifeIdx].damage) { printf("FAIL knife 1-hits R2 (needs 2)\n"); fails++; }
+        if (r2 > gWeapons[knifeIdx].damage * 2) { printf("FAIL knife needs >2 hits on R2\n"); fails++; }
+    } else if (gWeapons[knifeIdx].damage < r1) {
+        printf("FAIL fallback knife cannot 1-hit R1\n"); fails++;
+    }
     // sharp ramp after round 10 (original CoD Zombies: ~+15%/round)
     if (r10 <= 900.0f) { printf("FAIL R10 hp %.0f not sharply scaled\n", r10); fails++; }
     if (r15 < r10 * 1.9f) { printf("FAIL R10->R15 ramp too slow (%.0f -> %.0f)\n", r10, r15); fails++; }
     // 20 guns + knife
     int gunCount = 0;
-    for (int i = 0; i < NUM_GUNS; i++) if (WEAPONS[i].name[0]) gunCount++;
+    for (int i = 0; i < gGunCount; i++) if (i != knifeIdx && gWeapons[i].name[0]) gunCount++;
     printf("guns: %d (+knife)\n", gunCount);
-    if (gunCount != 20) { printf("FAIL need exactly 20 guns, got %d\n", gunCount); fails++; }
+    if (gunCount < (sSelftestFallback ? 5 : 20) || (!sSelftestFallback && gunCount != 20)) {
+        printf("FAIL need %s guns, got %d\n", sSelftestFallback ? ">=5 fallback" : "exactly 20", gunCount);
+        fails++;
+    }
     // box weights
     int totalW = 0;
-    for (int i = 0; i < NUM_GUNS; i++) totalW += WEAPONS[i].boxWeight;
+    for (int i = 0; i < gGunCount; i++) if (i != knifeIdx) totalW += gWeapons[i].boxWeight;
     if (totalW <= 0) { printf("FAIL no weapons in mystery box\n"); fails++; }
     // maps
-    static const char *mapNames[] = { "Theater", "Bunker", "Graveyard", "DieArise", "DeadCon5" };
-    for (int mapi = 0; mapi < MAP_COUNT; mapi++) {
+    static const char *mapNames[] = { "Theater", "Bunker", "Graveyard", "DieArise", "DeadCon5",
+                                       "Map6", "Map7", "Map8", "Map9", "Map10", "Map11", "Map12" };
+    for (int mapi = 0; mapi < gMapCount; mapi++) {
         char err[128] = {0};
         // load map into g.map for nav functions, run checks
         bool ok = MapValidate((MapId)mapi, err, sizeof err);
         printf("map %d (%s): %s%s\n", mapi, mapNames[mapi],
                ok ? "OK" : "FAIL: ", ok ? "" : err);
         if (!ok) fails++;
+    }
+    // data-driven checks
+    {
+        printf("data: guns=%d perks=%d skins=%d maps=%d\n",
+               DataGunCount(), DataPerkCount(), DataSkinCount(), DataMapCount());
+        if (!sSelftestFallback && DataGunCount() < 20) { printf("FAIL need >=20 guns from guns.json, got %d\n", DataGunCount()); fails++; }
+        int knife = GunIndex("knife");
+        if (knife < 0) { printf("FAIL knife missing from gun table\n"); fails++; }
+        else if (gWeapons[knife].mode != FIRE_MELEE) { printf("FAIL knife not melee\n"); fails++; }
+        // every gun in guns.json has a model file (plain fopen: selftest
+        // runs before InitWindow, raylib file helpers need GL up)
+        for (int i = 0; !sSelftestFallback && i < gGunCount; i++) {
+            char path[512];
+            snprintf(path, sizeof path, "%s/guns/%s.obj", DataDir(), gWeapons[i].modelId);
+            FILE *mf = fopen(path, "rb");
+            if (!mf) {
+                printf("FAIL gun %s model missing: %s\n", gWeapons[i].name, path);
+                fails++;
+            } else fclose(mf);
+        }
+        // every wall buy / perk in every map references a known id
+        for (int mi = 0; !sSelftestFallback && mi < gMapCount; mi++) {
+            char path[512];
+            snprintf(path, sizeof path, "%s/%s", DataDir(), gMaps[mi].file);
+            char *txt = JsonReadFile(path);
+            JsonNode *j = txt ? JsonParse(txt) : NULL;
+            if (!j) { printf("FAIL map %d (%s) did not load\n", mi, gMaps[mi].name); if (txt) free(txt); fails++; continue; }
+            JsonNode *wb = JsonGet(j, "wallbuys");
+            for (int wi = 0; wi < JsonLen(wb); wi++) {
+                JsonNode *w = JsonAt(wb, wi);
+                if (GunIndex(JsonStr(w, "gun", "")) < 0) {
+                    printf("FAIL map %s wallbuy %d: unknown gun \"%s\"\n",
+                           gMaps[mi].name, wi, JsonStr(w, "gun", "?"));
+                    fails++;
+                }
+            }
+            JsonNode *pk = JsonGet(j, "perks");
+            for (int pi = 0; pi < JsonLen(pk); pi++) {
+                JsonNode *p = JsonAt(pk, pi);
+                if (PerkIndex(JsonStr(p, "perk", "")) < 0) {
+                    printf("FAIL map %s perk %d: unknown perk \"%s\"\n",
+                           gMaps[mi].name, pi, JsonStr(p, "perk", "?"));
+                    fails++;
+                }
+            }
+            free(txt);
+        }
+        // hellhound schedule sanity
+        if (!ZombieIsDogRound(5) || ZombieIsDogRound(6) || !ZombieIsDogRound(10)) {
+            printf("FAIL dog round schedule wrong (every=%d first=%d)\n",
+                   gGameplay.dogEvery, gGameplay.dogFirstRound);
+            fails++;
+        }
+        if (gGameplay.dogHp <= 0 || gGameplay.dogSpeed <= 0) {
+            printf("FAIL dog stats invalid\n"); fails++;
+        }
+        printf("dogs: hp=%.0f speed=%.1f every=%d | maxammo: %d%% %.0fs\n",
+               gGameplay.dogHp, gGameplay.dogSpeed, gGameplay.dogEvery,
+               gGameplay.maxAmmoChance, gGameplay.maxAmmoLife);
+        // gameplay curve still matches the design invariants
+        float r10b = ZombieHpForRound(10), r15b = ZombieHpForRound(15);
+        if (r10b <= 900.0f) { printf("FAIL R10 hp %.0f not sharply scaled\n", r10b); fails++; }
+        if (r15b < r10b * 1.9f) { printf("FAIL R10->R15 ramp too slow (%.0f -> %.0f)\n", r10b, r15b); fails++; }
+        // fallback tables complete (used when data files are missing)
+        if (gPerkCount < 6) { printf("FAIL perk fallback table incomplete\n"); fails++; }
+        if (gSkinCount < 5) { printf("FAIL skin fallback table incomplete\n"); fails++; }
     }
     // settings sanity (persisted defaults round-trip)
     {
@@ -331,7 +416,9 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
     SfxSetVolume(g.volMaster, g.volSfx);
     // CI/headless hook: SMOKE_HARD=1 runs the smoke in hard mode (torch test)
     if (getenv("SMOKE_HARD")) g.hardMode = true;
+    DataLoadAll();
     AssetsLoad();
+    GunModelsInit();
     HudInitFont();
     GfxInit();
     GameStart((MapId)mapId);
@@ -362,6 +449,7 @@ static int RunSmoke(const char *outdir, int mapId, float seconds) {
         TorchUpdate();
         ZombiesUpdate();
         BoxUpdate();
+        DropsUpdate();
         // draw
         Camera3D cam = BuildCamera();
         UpdateTorchLight(cam);
@@ -412,10 +500,12 @@ static int RunVmTest(const char *outdir) {
     SetTargetFPS(60);
     LoadSettings(); LoadScores();
     SfxSetVolume(g.volMaster, g.volSfx);
+    DataLoadAll();
     AssetsLoad();
+    GunModelsInit();
     HudInitFont();
     GfxInit();
-    GameStart(MAP_THEATER);
+    GameStart(0);
     g.roundBannerActive = false;
     g.player.raiseTimer = 0;   // gun fully raised
     g.player.bobPhase = 0;     // no bob noise
@@ -480,7 +570,21 @@ int main(int argc, char **argv) {
             // no window: only validate data structures + nav
             memset(&g, 0, sizeof(g));
             LoadSettings(); LoadScores();
+            DataLoadAll();
             return RunSelftest() == 0 ? 0 : 1;
+        }
+        if (!strcmp(argv[i], "--selftest-fallback")) {
+            // data fallback check: run selftest with the data dir pointed at
+            // an empty dir -> everything must come from built-in defaults and
+            // the game must not crash
+            memset(&g, 0, sizeof(g));
+            LoadSettings(); LoadScores();
+            DataSetDir("assets_empty");
+            sSelftestFallback = true;
+            DataLoadAll();
+            int r = RunSelftest();
+            printf("fallback selftest: %s\n", r == 0 ? "OK" : "FAIL");
+            return r == 0 ? 0 : 1;
         }
         if (!strcmp(argv[i], "--smoke") && i + 2 < argc) {
             const char *outdir = argv[i+1];
@@ -502,7 +606,9 @@ int main(int argc, char **argv) {
     SetExitKey(KEY_NULL);      // handle ESC ourselves
     LoadScores();
     SfxSetVolume(g.volMaster, g.volSfx);
+    DataLoadAll();
     AssetsLoad();
+    GunModelsInit();
     HudInitFont();
     GfxInit();
     g.state = STATE_TITLE;
@@ -541,6 +647,7 @@ int main(int argc, char **argv) {
             PlayerUpdate();
             ZombiesUpdate();
             BoxUpdate();
+            DropsUpdate();
             break;
         case STATE_PAUSED:
         case STATE_TITLE:
@@ -555,9 +662,26 @@ int main(int argc, char **argv) {
         // draw
         BeginDrawing();
         if (g.state == STATE_PLAYING || g.state == STATE_PAUSED || g.state == STATE_GAMEOVER) {
+            // restore normal scene after a dog round ends (red-sky override
+            // above only re-sets colors while it is active)
+            static bool sDogSkyWas = false;
+            bool dogNow = (g.dogRound || g.dogWarnTimer > 0);
+            if (sDogSkyWas && !dogNow)
+                GfxSetScene(g.map.sunDir, g.map.sunColor, g.map.ambient, g.map.fillDir, g.map.fillColor, g.map.fogColor, g.map.fogDensity);
+            sDogSkyWas = dogNow;
             Camera3D cam = BuildCamera();
             UpdateTorchLight(cam);
-            ClearBackground(g.map.fogColor);
+            // hellhound rounds burn the sky red (per-map dogSky* colors)
+            Color fogC = g.map.fogColor;
+            if (g.dogRound || g.dogWarnTimer > 0) {
+                float k = g.dogWarnTimer > 0 ? CLAMP(1.0f - g.dogWarnTimer / 3.0f, 0, 1) : 1.0f;
+                Color dFog = g.map.dogFogColor;
+                fogC.r = (unsigned char)LERP(fogC.r, dFog.r, k);
+                fogC.g = (unsigned char)LERP(fogC.g, dFog.g, k);
+                fogC.b = (unsigned char)LERP(fogC.b, dFog.b, k);
+                GfxSetScene(g.map.sunDir, g.map.sunColor, g.map.ambient, g.map.fillDir, g.map.fillColor, fogC, g.map.fogDensity);
+            }
+            ClearBackground(fogC);
             GfxDrawSky(cam, g.player.pitch);
             GfxBegin(cam);
             GfxDrawStatic();
@@ -567,6 +691,7 @@ int main(int argc, char **argv) {
                 if (g.map.boxes[i].doorId > 0 && !g.map.doorOpen[g.map.boxes[i].doorId-1])
                     GfxDrawBox(g.map.boxes[i].aabb, g.map.boxes[i].tex, WHITE);
             ZombiesDraw(cam);
+            DropsDraw(cam);
             ParticlesDraw(cam);
             WeaponDrawViewmodel(cam);
             GfxEnd();

@@ -1,0 +1,8 @@
+{
+  "default":  { "name": "Default",  "body": [255,255,255], "dark": [255,255,255], "accent": [255,255,255] },
+  "midnight": { "name": "Midnight", "body": [ 52, 54, 58], "dark": [ 34, 35, 38], "accent": [120,130,255] },
+  "desert":   { "name": "Desert",   "body": [168,142, 90], "dark": [120, 98, 60], "accent": [ 92, 70, 40] },
+  "crimson":  { "name": "Crimson",  "body": [150, 40, 40], "dark": [ 90, 24, 24], "accent": [220,160, 60] },
+  "forest":   { "name": "Forest",   "body": [ 60, 92, 56], "dark": [ 40, 62, 38], "accent": [130,150,110] },
+  "gold":     { "name": "Gold",     "extends": "desert",   "accent": [235, 195, 80] }
+}

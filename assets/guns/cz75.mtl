@@ -1,0 +1,25 @@
+# generated
+newmtl body
+Kd 0.204 0.212 0.227
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 10
+
+newmtl dark
+Kd 0.133 0.137 0.149
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 10
+
+newmtl accent
+Kd 0.431 0.333 0.235
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 10
+
+newmtl silver
+Kd 0.784 0.792 0.816
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 10
+

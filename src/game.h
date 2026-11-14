@@ -42,11 +42,11 @@
 #define REGEN_DELAY       10.0f        // Regen Soda: 10 s after last hit
 #define REGEN_RATE        25.0f        // hp per second once regen kicks in
 
-#define POINTS_START      500
-#define POINTS_PER_HIT    10
-#define POINTS_PER_KILL   50
-#define BOX_PRICE         950
-#define PAP_PRICE         5000         // Pack-a-Punch upgrade cost
+#define POINTS_START      gGameplay.pointsStart
+#define POINTS_PER_HIT    gGameplay.pointsPerHit
+#define POINTS_PER_KILL   gGameplay.pointsPerKill
+#define BOX_PRICE         gGameplay.boxPrice
+#define PAP_PRICE         gGameplay.papPrice
 
 #define MAX_BOXES         640
 #define MAX_DOORS         16
@@ -56,14 +56,12 @@
 #define MAX_ZIPLINES      4
 #define MAX_JUMPPADS      10
 #define MAX_KILLZONES     8
+#define MAX_DROPS         8             // simultaneous ground power-ups
 
 #define MAX_ZOMBIES       48
 #define MAX_PARTICLES     512
 #define WEAPON_SLOTS      3             // primary, secondary, knife
 #define SLOT_KNIFE        2
-
-#define NUM_GUNS          20            // guns, knife NOT counted (user spec)
-#define GUN_COUNT_TOTAL   (NUM_GUNS+1)  // + knife
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -87,86 +85,17 @@ float   RngRange(float a, float b);
 int     RngInt(int n);                  // [0, n)
 
 // ---------------------------------------------------------------------------
-// Weapons
+// Weapons / perks / skins / gameplay: runtime tables live in data.h and are
+// loaded from assets/*.json (see data.c). Fixed-size engine arrays only.
 // ---------------------------------------------------------------------------
-typedef enum {
-    FIRE_SEMI = 0,
-    FIRE_AUTO,
-    FIRE_BURST,      // 3-round burst
-    FIRE_BOLT,       // bolt-action sniper
-    FIRE_PUMP,       // pump shotgun
-    FIRE_MELEE
-} FireMode;
-
-typedef struct WeaponDef {
-    const char *name;
-    FireMode    mode;
-    int         damage;      // per bullet
-    int         pellets;     // bullets per trigger pull (shotguns)
-    int         mag;         // magazine size
-    int         reserve;     // reserve ammo when bought
-    int         rpm;         // rounds per minute
-    float       reloadTime;  // seconds
-    float       spread;      // hip-fire spread (rad)
-    float       adsSpread;   // aimed spread (rad)
-    float       recoil;      // view kick strength
-    int         wallPrice;   // >0: available as wall buy for this price
-    int         boxWeight;   // relative weight in mystery box (0 = not in box)
-    int         shape;       // viewmodel variant (GUNSHAPE_*): extra parts drawn
-    // low-poly viewmodel shape (meters, gun-space: +Z forward)
-    float       bodyLen, bodyW, bodyH;   // receiver
-    float       barrelLen, barrelR;      // barrel
-    float       magW, magH;              // magazine drop below receiver
-    float       stockLen;                // stock behind grip
-    float       sightH;                  // front sight post height
-    float       adsFov;                  // FOV while aiming (0 = default 55)
-    Color       accent;                  // wood / polymer accent color
-} WeaponDef;
-
-// viewmodel shape variants (guns share dims; these add distinguishing parts)
-enum {
-    GUNSHAPE_BASIC = 0,     // receiver+barrel+grip+stock (pistols, most rifles)
-    GUNSHAPE_REVOLVER,      // cylinder + longer curved barrel
-    GUNSHAPE_BANANA,        // curved banana magazine (AK family)
-    GUNSHAPE_DRUM,          // drum magazine (RPK, HK21 - tied to their dims)
-    GUNSHAPE_WINGS,         // barrel heat-shield wings (Spectre)
-    GUNSHAPE_FOLDSTOCK,     // folding stock strut (MP5K, PM63)
-    GUNSHAPE_DOUBLEBARREL,  // two side-by-side barrels (Olympia)
-    GUNSHAPE_TUBEMAG,       // under-barrel tube magazine (Stakeout)
-    GUNSHAPE_UNDERSLUNG,    // chunky underbarrel pump/grenade tube (China Lake)
-    GUNSHAPE_CARRYHANDLE,   // carry handle + comp sight (M16, FAMAS bullpup)
-    GUNSHAPE_BULLPUP,       // mag behind the grip (FAMAS)
-    GUNSHAPE_SNIPERBOLT,    // bolt handle + scope rings (L96A1)
-};
-
-extern const WeaponDef WEAPONS[GUN_COUNT_TOTAL];
-
-enum { W_M1911 = 0, W_PYTHON, W_CZ75, W_MP5K, W_AK74U, W_SPECTRE, W_PM63,
-       W_MPL, W_OLYMPIA, W_STAKEOUT, W_HS10, W_CHINALAKE, W_M16, W_ENFIELD,
-       W_COMMANDO, W_GALIL, W_FAMAS, W_RPK, W_HK21, W_L96A1, W_KNIFE };
+#include "data.h"
 
 typedef struct WeaponSlot {
-    int widx;            // index into WEAPONS, -1 = empty
+    int widx;            // index into gWeapons, -1 = empty
     int magAmmo;
     int reserveAmmo;
     bool upgraded;       // Pack-a-Punched
 } WeaponSlot;
-
-// ---------------------------------------------------------------------------
-// Perks
-// ---------------------------------------------------------------------------
-typedef enum {
-    PERK_REVIVE = 0,     // Self Revive - get back up when downed (consumed)
-    PERK_REGEN,          // Regen Soda - auto regen 10 s after last hit
-    PERK_SWIFT,          // Swift Soda - 40% faster reloads
-    PERK_RAPID,          // Rapid Cola - 25% faster fire rate
-    PERK_STAMIN,         // Stamin-Up - move & sprint faster
-    PERK_JUGG,           // Juggernaut Soda - survive 4 hits instead of 2
-    PERK_COUNT
-} PerkType;
-
-typedef struct { const char *name; const char *desc; int price; Color color; } PerkDef;
-extern const PerkDef PERKS[PERK_COUNT];
 
 // ---------------------------------------------------------------------------
 // Textures (procedurally generated PNGs in textures/, with in-code fallback)
@@ -194,9 +123,12 @@ enum {
 enum { MUS_AMBIENT = 0, MUS_COUNT };
 
 // ---------------------------------------------------------------------------
-// Maps
+// Maps: registry is dynamic (gMaps/gMapCount in data.h); a "map id" is an
+// index into that registry. MAP_COUNT survives as the loaded count for
+// loops (use gMapCount in new code).
 // ---------------------------------------------------------------------------
-typedef enum { MAP_THEATER = 0, MAP_BUNKER, MAP_GRAVEYARD, MAP_DIE_ARISE, MAP_DEAD_CON_5, MAP_COUNT } MapId;
+#define MAP_COUNT ((MapId)gMapCount)
+typedef int MapId;
 
 typedef struct WorldBox {
     AABB    aabb;
@@ -223,7 +155,7 @@ typedef struct WallBuy {
     float    yaw;           // facing
 } WallBuy;
 
-typedef struct PerkStation { PerkType type; Vector3 pos; float yaw; } PerkStation;
+typedef struct PerkStation { int perkType; Vector3 pos; float yaw; } PerkStation;   // gPerks index
 typedef struct JumpPad     { Vector3 pos; float radius; Vector3 impulse; } JumpPad;
 typedef struct Zipline     { Vector3 a, b; } Zipline;
 
@@ -232,6 +164,7 @@ typedef struct MapDef {
     const char *desc;
     const char *filename;   // asset-free id
     int         difficulty; // 1..5
+    int         mapIndex;   // index into gMaps (registry)
     WorldBox    boxes[MAX_BOXES]; int boxCount;
     DoorDef     doors[MAX_DOORS]; int doorCount;
     bool        doorOpen[MAX_DOORS];
@@ -253,10 +186,12 @@ typedef struct MapDef {
     Color       fillColor;            // fill light color
     Vector3     playerStart;
     float       playerYaw;
+    // hellhound rounds: sky tints while a dog round is active
+    Color       dogSkyTop, dogSkyHorizon, dogFogColor;
 } MapDef;
 
 // ---------------------------------------------------------------------------
-// Zombies
+// Zombies (and hellhounds)
 // ---------------------------------------------------------------------------
 typedef enum { ZS_RISE = 0, ZS_CHASE, ZS_ATTACK, ZS_DEAD } ZState;
 
@@ -276,10 +211,24 @@ typedef struct Zombie {
     float    pathTimer;
     float    groundY;
     bool     runner;
+    bool     dog;            // hellhound round member
     // stuck detection: last distance to player + timer since it last shrank
     float    lastDist;
     float    stuckTimer;
 } Zombie;
+
+// ---------------------------------------------------------------------------
+// Ground power-up drops (max ammo)
+// ---------------------------------------------------------------------------
+typedef enum { DROP_MAXAMMO = 0 } DropType;
+
+typedef struct PowerDrop {
+    bool     alive;
+    DropType type;
+    Vector3  pos;
+    float    life;           // seconds before despawn
+    float    spin;
+} PowerDrop;
 
 // ---------------------------------------------------------------------------
 // Rebindable key actions (settings)
@@ -313,7 +262,9 @@ typedef struct Player {
     float       hp;
     float       lastHitTime;  // for regen perk
     int         points;
-    bool        perks[PERK_COUNT];
+    bool        perks[PERK_SLOTS_MAX];
+    int         juggHitCount; // hits taken while juggernog protects (4 = perk gone)
+    float       juggLastHit;
     WeaponSlot  weapons[WEAPON_SLOTS];
     int         curSlot;
     // weapon runtime
@@ -360,6 +311,10 @@ typedef struct Game {
     float       spawnTimer;
     bool        roundBannerActive;
     float       roundBannerTime;
+    bool        dogRound;            // current round is a hellhound round
+    float       dogWarnTimer;        // >0 = warning growl phase before dogs
+    PowerDrop   drops[MAX_DROPS];    // ground power-ups
+    float       dropPickupFlash;     // brief HUD flash after picking one up
     // mystery box runtime
     bool        boxInUse;
     float       boxSpinTimer;
@@ -380,7 +335,7 @@ typedef struct Game {
     // input helpers
     bool        ePressedThisFrame;
     float       menuBlur;
-    int         bestRound[MAP_COUNT];
+    int         bestRound[MAP_SLOTS_MAX];
     // settings (persisted)
     float       sens;                  // 0.2 .. 10.0 (slider maps 0..1 -> exponential)
     float       volMaster, volMusic, volSfx;
@@ -420,6 +375,8 @@ void    GfxDrawCubePart(Vector3 pos, Vector3 size, Vector3 rotDeg, Color tint, T
 void    GfxDrawCubeBasis(Vector3 pos, Vector3 right, Vector3 up, Vector3 fwd,
                          float sx, float sy, float sz, Color tint, Texture2D tex);
 void    GfxInitMaterials(void);
+Material* GfxScratchMaterial(void);      // world-shader material for custom draws
+void    GfxSetTint(Color tint);          // per-draw tint (world shader)
 void    GfxEnd(void);
 // mesh-builder (static world geometry accumulation):
 void    Gfx_MB_Box(int tex, AABB box, float uvScale);
@@ -464,10 +421,21 @@ void    PlayerUpdate(void);
 void    PlayerDraw(Camera3D cam);
 void    PlayerDamage(float dmg);
 void    PlayerDownedUpdate(void);
-bool    PlayerHasPerk(PerkType p);
+bool    PlayerHasPerk(int perkIdx);           // gPerks index
 Vector3 Vec3Lerp4(Vector3 a, Vector3 b, float t);
 // interaction scan for HUD (returns label of thing being looked at)
 const char* PlayerInteractLabel(void);
+// gun viewmodel models (OBJ files under assets/guns/)
+void    GunModelsInit(void);                  // load every model once
+void    GunModelsUnload(void);
+bool    GunModelValid(int widx);              // model loaded for this gun?
+
+// ---------------------------------------------------------------------------
+// Power-up drops
+// ---------------------------------------------------------------------------
+void    DropSpawn(Vector3 pos, DropType type);
+void    DropsUpdate(void);
+void    DropsDraw(Camera3D cam);
 
 // ---------------------------------------------------------------------------
 // Module: weapons
@@ -492,6 +460,7 @@ void    ZombiesUpdate(void);
 void    ZombiesDraw(Camera3D cam);
 void    ZombieDamage(Zombie *z, float dmg, Vector3 hitPos, bool melee);
 int     ZombiesAliveCount(void);
+bool    ZombieIsDogRound(int round);           // hellhound schedule (gameplay.json)
 float   ZombieHpForRound(int round);
 float   ZombieSpeedForRound(int round);
 int     ZombieQuotaForRound(int round);

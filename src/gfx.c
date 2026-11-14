@@ -266,7 +266,7 @@ void GfxSetFlash(Vector3 pos, float strength) {
 // Per-draw tint through our own uniform. raylib's colDiffuse upload path
 // proved unreliable (renders black on some drivers); SetShaderValue is
 // verified working everywhere we test.
-static void GfxSetTint(Color tint) {
+void GfxSetTint(Color tint) {
     float v[3] = { tint.r/255.0f, tint.g/255.0f, tint.b/255.0f };
     if (sTintLoc >= 0) SetShaderValue(sWorldShader, sTintLoc, v, SHADER_UNIFORM_VEC3);
 }
@@ -278,6 +278,7 @@ void GfxEnd(void) { EndMode3D(); }
 static Material sScratchMat;
 
 void GfxInitMaterials(void) { sScratchMat = LoadMaterialDefault(); }
+Material *GfxScratchMaterial(void) { sScratchMat.shader = sWorldShader; return &sScratchMat; }
 
 // Draw all static (merged) world geometry.
 void GfxDrawStatic(void) {
@@ -342,6 +343,16 @@ void GfxDrawSky(Camera3D cam, float playerPitchDeg) {
     float horizon = h*0.5f + (playerPitchDeg/halfFovTan)*(h*0.5f);
     horizon = CLAMP(horizon, -h*0.5f, h*1.5f);
     Color top = g.map.skyTop, hor = g.map.skyHorizon;
+    // hellhound rounds burn red (same blend as the fog in main.c)
+    if (g.dogRound || g.dogWarnTimer > 0) {
+        float k = g.dogWarnTimer > 0 ? CLAMP(1.0f - g.dogWarnTimer / 3.0f, 0, 1) : 1.0f;
+        top.r  = (unsigned char)LERP(top.r,  g.map.dogSkyTop.r, k);
+        top.g  = (unsigned char)LERP(top.g,  g.map.dogSkyTop.g, k);
+        top.b  = (unsigned char)LERP(top.b,  g.map.dogSkyTop.b, k);
+        hor.r  = (unsigned char)LERP(hor.r,  g.map.dogSkyHorizon.r, k);
+        hor.g  = (unsigned char)LERP(hor.g,  g.map.dogSkyHorizon.g, k);
+        hor.b  = (unsigned char)LERP(hor.b,  g.map.dogSkyHorizon.b, k);
+    }
     // sky above horizon: draw in explicit bands (robust in every driver)
     if (horizon > 0) {
         int skyH = (int)CLAMP(horizon, 0, h);

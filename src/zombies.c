@@ -10,25 +10,37 @@
 // Round scaling (COD-zombies style, slow ramp)
 // ---------------------------------------------------------------------------
 float ZombieHpForRound(int round) {
-    // R1 = 100 (knife 150 one-hits), R2 = 200 (knife needs exactly 2),
-    // +100/round through R9 (R9 = 900), then the original CoD Zombies
-    // sharp ramp: +15%/round compounding from round 10.
-    if (round <= 1) return 100.0f;
-    if (round == 2) return 200.0f;
-    if (round <= 9) return 200.0f + (round - 2) * 100.0f;
-    return 900.0f * powf(1.15f, (float)(round - 9));
+    // data-driven curve (gameplay.json zombieHealth): R1 = base (100,
+    // knife 150 one-hits), R2 = round2 (200, knife needs exactly 2),
+    // +linearPerRound through linearUntil (R9 = 900), then the original
+    // CoD Zombies sharp ramp: +growthPerRound compounding from there.
+    if (round <= 1) return gGameplay.hpBase;
+    if (round == 2) return gGameplay.hpRound2;
+    if (round <= gGameplay.hpLinearUntil)
+        return gGameplay.hpRound2 + (round - 2) * gGameplay.hpLinearPerRound;
+    float atLinEnd = gGameplay.hpRound2 + (gGameplay.hpLinearUntil - 2) * gGameplay.hpLinearPerRound;
+    return atLinEnd * powf(gGameplay.hpGrowth, (float)(round - gGameplay.hpLinearUntil));
 }
 
 float ZombieSpeedForRound(int round) {
-    // base walk 0.95 m/s, +0.06/round capped; runners appear later
-    float s = 0.95f + (round - 1) * 0.055f;
-    return CLAMP(s, 0.9f, 2.6f);
+    float s = gGameplay.speedBase + (round - 1) * gGameplay.speedPerRound;
+    return CLAMP(s, gGameplay.speedMin, gGameplay.speedMax);
 }
 
 int ZombieQuotaForRound(int round) {
-    // slow ramp: ~6 zombies round 1, +~25%/round, cap at MAX_ZOMBIES alive
-    int q = (int)(6.0f * powf(1.22f, (float)(round - 1)));
-    return q > 120 ? 120 : q;
+    if (ZombieIsDogRound(round)) {
+        // dog rounds: small pack, fixed window (fast and frantic)
+        int q = gGameplay.dogQuotaMin + round / 8;
+        return CLAMP(q, gGameplay.dogQuotaMin, gGameplay.dogQuotaMax);
+    }
+    int q = (int)(gGameplay.quotaBase * powf(gGameplay.quotaGrowth, (float)(round - 1)));
+    return q > gGameplay.quotaCap ? gGameplay.quotaCap : q;
+}
+
+bool ZombieIsDogRound(int round) {
+    // every `dogEvery` rounds starting at dogFirstRound (gameplay.json)
+    if (gGameplay.dogEvery <= 0 || round < gGameplay.dogFirstRound) return false;
+    return (round - gGameplay.dogFirstRound) % gGameplay.dogEvery == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,16 +176,23 @@ static void SpawnZombie(void) {
     if (z->groundY < -50 || fabsf(z->groundY - sp->pos.y) > 2.5f)
         z->groundY = GroundHeightAt(sp->pos.x, sp->pos.z, sp->pos.y + 6.0f);
     if (z->groundY < -50) z->groundY = sp->pos.y;
-    z->maxHp = ZombieHpForRound(g.round);
+    z->dog = g.dogRound;
+    if (z->dog) {
+        z->maxHp = gGameplay.dogHp;
+        z->speed = gGameplay.dogSpeed * RngRange(0.9f, 1.1f);
+        z->runner = false;
+    } else {
+        z->maxHp = ZombieHpForRound(g.round);
+        z->speed = ZombieSpeedForRound(g.round) * RngRange(0.9f, 1.1f);
+        z->runner = (g.round >= gGameplay.runnerFromRound &&
+                     RngInt(100) < gGameplay.runnerChanceBase + g.round);
+        if (z->runner) z->speed *= 1.9f;
+    }
     z->hp = z->maxHp;
-    z->speed = ZombieSpeedForRound(g.round) * RngRange(0.9f, 1.1f);
     z->variant = RngInt(4);
     z->animPhase = RngRange(0, PI*2);
     z->attackCd = 0;
     z->lastDist = Vec3Len(Vec3Sub(target, z->pos));
-    // runners: small chance from round 5+
-    z->runner = (g.round >= 5 && RngInt(100) < 4 + g.round);
-    if (z->runner) z->speed *= 1.9f;
     if (sp->grave) {
         // start below ground
         z->pos.y = z->groundY - 1.8f;
@@ -201,6 +220,11 @@ void ZombieDamage(Zombie *z, float dmg, Vector3 hitPos, bool melee) {
         g.hitMarker = 0.3f;
         SfxPlay(SND_SQUISH, RngRange(0.8f, 0.95f), 0.9f);
         ParticlesBurst(Vec3(z->pos.x, z->groundY + 1.0f, z->pos.z), 14, (Color){110, 18, 22, 255}, 2.6f, 0.09f, 0.7f, true);
+        // max ammo drop: rare chance per kill; the last hellhound of a dog
+        // round always drops one (the classic round reward)
+        bool lastDog = z->dog && g.roundKills >= g.roundQuota;
+        if (lastDog || RngInt(100) < gGameplay.maxAmmoChance)
+            DropSpawn(Vec3(z->pos.x, z->groundY + 0.3f, z->pos.z), DROP_MAXAMMO);
     } else {
         AddPoints(POINTS_PER_HIT);
     }
@@ -221,6 +245,8 @@ void ZombiesInitRound(void) {
     g.roundKills = 0;
     g.roundSpawned = 0;
     g.spawnTimer = 2.0f;
+    g.dogRound = ZombieIsDogRound(g.round);
+    g.dogWarnTimer = g.dogRound ? 3.0f : 0;
 }
 
 static void RoundAdvance(void) {
@@ -229,10 +255,21 @@ static void RoundAdvance(void) {
     g.roundBannerActive = true;
     g.roundBannerTime = 3.0f;
     SfxPlay(SND_ROUND_START, 1.0f, 0.9f);
+    if (g.dogRound) {
+        // warning growl + sky turns blood red for the dog round
+        SfxPlay(SND_ZRISE, 0.6f, 1.0f);
+        SfxPlay(SND_GROAN1, 0.55f, 1.0f);
+    }
     // Self Revive re-armable each new round (bought again from machine)
 }
 
 void ZombiesUpdate(void) {
+    // dog round warning phase: growl has sounded, dogs not yet spawning
+    if (g.dogWarnTimer > 0) {
+        g.dogWarnTimer -= (float)g.dt;
+        if (RngInt(120) == 0) SfxPlay(SND_GROAN1 + RngInt(3), 0.5f, 0.8f);
+        return;
+    }
     // intermission
     if (g.roundIntermission > 0) {
         g.roundIntermission -= (float)g.dt;
@@ -243,7 +280,8 @@ void ZombiesUpdate(void) {
     int alive = ZombiesAliveCount();
     if (g.roundKills >= g.roundQuota) {
         // round cleared
-        g.roundIntermission = 6.0f;
+        g.roundIntermission = g.dogRound ? 3.0f : 6.0f;
+        g.dogRound = false;   // sky back to normal during intermission
         SfxPlay(SND_ROUND_END, 1.0f, 0.8f);
         return;
     }
@@ -343,7 +381,7 @@ void ZombiesUpdate(void) {
                 z->attackCd = 1.1f;
                 z->animPhase = 0;   // swing anim
                 SfxPlay(SND_ZATTACK, RngRange(0.9f, 1.1f), 0.8f);
-                if (dist < 1.6f) PlayerDamage(ZOMBIE_HIT_DMG);
+                if (dist < 1.6f) PlayerDamage(z->dog ? gGameplay.zombieHitDmg * 1.2f : gGameplay.zombieHitDmg);
             }
             z->yaw = atan2f(-d.x, -d.z) * RAD2DEG;
             z->animPhase += (float)g.dt * 4.0f;
@@ -361,11 +399,60 @@ void ZombiesUpdate(void) {
 // ---------------------------------------------------------------------------
 // Drawing: low-poly body parts, procedural shamble animation
 // ---------------------------------------------------------------------------
+static void DogDraw(Zombie *z) {
+    float ph = z->animPhase;
+    bool attacking = (z->state == ZS_ATTACK);
+    // hellhound: long low body, four legs, snarling head, ember eyes
+    Color fur  = (Color){ 38, 30, 30, 255 };
+    Color ember = (Color){ 255, 120, 40, 255 };
+    if (z->hitFlash > 0) fur = (Color){ 255, 90, 80, 255 };
+    float run = fminf(ph, 1e9f);
+    Vector3 base = z->pos;
+    // body: long box along facing
+    Vector3 fwd = Vec3(-sinf(z->yaw*DEG2RAD), 0, -cosf(z->yaw*DEG2RAD));
+    Vector3 right = Vec3(-fwd.z, 0, fwd.x);
+    Vector3 bodyPos = Vec3Add(base, Vec3Scale(fwd, 0.15f));
+    GfxDrawCubePart(Vec3(bodyPos.x, base.y + 0.42f, bodyPos.z), Vec3(0.34f, 0.34f, 0.85f),
+                    Vec3(0, z->yaw, 0), fur, AssetsTex(TEX_ZOMBIE));
+    // head + snout
+    Vector3 headPos = Vec3Add(base, Vec3Scale(fwd, 0.62f));
+    GfxDrawCubePart(Vec3(headPos.x, base.y + 0.52f + sinf(run*2)*0.02f, headPos.z), Vec3(0.26f, 0.24f, 0.30f),
+                    Vec3(attacking ? -12.0f : 0, z->yaw, 0), fur, AssetsTex(TEX_ZOMBIE));
+    Vector3 snoutPos = Vec3Add(base, Vec3Scale(fwd, 0.80f));
+    GfxDrawCubePart(Vec3(snoutPos.x, base.y + 0.47f, snoutPos.z), Vec3(0.12f, 0.12f, 0.16f),
+                    Vec3(attacking ? -12.0f : 0, z->yaw, 0), fur, AssetsTex(TEX_ZOMBIE));
+    // ember eyes
+    for (int side = -1; side <= 1; side += 2) {
+        Vector3 e = Vec3Add(Vec3Add(headPos, Vec3Scale(fwd, 0.14f)), Vec3Scale(right, 0.07f*side));
+        GfxDrawCubePart(Vec3(e.x, base.y + 0.56f, e.z), Vec3(0.04f, 0.04f, 0.04f), Vec3(0,0,0), ember, AssetsTex(TEX_FLASH));
+    }
+    // tail
+    Vector3 tailPos = Vec3Sub(base, Vec3Scale(fwd, 0.42f));
+    GfxDrawCubePart(Vec3(tailPos.x, base.y + 0.50f, tailPos.z), Vec3(0.07f, 0.07f, 0.34f),
+                    Vec3(0, z->yaw + sinf(ph*2)*8.0f, 0), fur, AssetsTex(TEX_ZOMBIE));
+    // legs: gallop cycle
+    for (int side = -1; side <= 1; side += 2) {
+        for (int fr = 0; fr < 2; fr++) {
+            float phase = ph + (side > 0 ? 0 : PI) + (fr ? PI*0.5f : 0);
+            float swing = sinf(phase) * 0.16f;
+            Vector3 leg = Vec3Add(Vec3Add(base, Vec3Scale(fwd, fr ? 0.32f : -0.28f)), Vec3Scale(right, 0.12f*side));
+            GfxDrawCubePart(Vec3(leg.x + swing*0.5f, base.y + 0.17f, leg.z + swing*0.5f), Vec3(0.09f, 0.36f, 0.09f),
+                            Vec3(0, z->yaw, 0), fur, AssetsTex(TEX_ZOMBIE));
+        }
+    }
+    // fire trail while running
+    if (z->state == ZS_CHASE && RngInt(3) == 0)
+        ParticlesSpawn(Vec3(base.x + RngRange(-0.15f, 0.15f), base.y + 0.2f, base.z + RngRange(-0.15f, 0.15f)),
+                       Vec3(RngRange(-0.2f, 0.2f), RngRange(0.4f, 1.0f), RngRange(-0.2f, 0.2f)),
+                       (Color){ 255, RngInt(120) + 80, 30, 255 }, 0.06f, 0.4f, false);
+}
+
 void ZombiesDraw(Camera3D cam) {
     (void)cam;
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         Zombie *z = &g.zombies[i];
         if (!z->alive) continue;
+        if (z->dog) { DogDraw(z); continue; }
         float ph = z->animPhase;
         bool attacking = (z->state == ZS_ATTACK);
         float swing = attacking ? sinf(fminf(z->stateTime*6.0f, PI)) : 0;
@@ -407,6 +494,75 @@ void ZombiesDraw(Camera3D cam) {
             float legSwing = sinf(ph + (side>0?0:PI)) * 0.35f;
             Vector3 legPos = Vec3(base.x + side*0.14f, base.y + 0.36f - fabsf(legSwing)*0.06f, base.z + legSwing*0.18f);
             GfxDrawCubePart(legPos, Vec3(0.16f, 0.72f, 0.18f), Vec3(0, z->yaw, 0), cloth, AssetsTex(TEX_ZOMBIE));
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Ground power-up drops (max ammo)
+// ---------------------------------------------------------------------------
+void DropSpawn(Vector3 pos, DropType type) {
+    // reuse a free slot (oldest expires first)
+    int slot = -1;
+    for (int i = 0; i < MAX_DROPS; i++)
+        if (!g.drops[i].alive) { slot = i; break; }
+    if (slot < 0) {
+        float minLife = 1e9;
+        for (int i = 0; i < MAX_DROPS; i++)
+            if (g.drops[i].life < minLife) { minLife = g.drops[i].life; slot = i; }
+    }
+    g.drops[slot] = (PowerDrop){ true, type, pos, gGameplay.maxAmmoLife, 0 };
+    SfxPlay(SND_BOX_WIN, 1.3f, 0.5f);
+}
+
+void DropsUpdate(void) {
+    Player *p = &g.player;
+    for (int i = 0; i < MAX_DROPS; i++) {
+        PowerDrop *d = &g.drops[i];
+        if (!d->alive) continue;
+        d->life -= (float)g.dt;
+        d->spin += (float)g.dt * 90.0f;
+        if (d->life <= 0) { d->alive = false; continue; }
+        // pickup: walk within 1.2 m
+        Vector3 dd = Vec3Sub(p->pos, d->pos);
+        dd.y = 0;
+        if (Vec3Len(dd) < 1.2f) {
+            d->alive = false;
+            if (d->type == DROP_MAXAMMO) {
+                for (int s = 0; s < 2; s++) {
+                    int wi = p->weapons[s].widx;
+                    if (wi < 0) continue;
+                    p->weapons[s].magAmmo = gWeapons[wi].mag;
+                    p->weapons[s].reserveAmmo = gWeapons[wi].reserve;
+                }
+                g.dropPickupFlash = 1.0f;
+                SfxPlay(SND_BUY, 0.8f, 1.0f);
+                SfxPlay(SND_BOX_WIN, 1.0f, 0.9f);
+                ParticlesBurst(Vec3(d->pos.x, d->pos.y + 0.6f, d->pos.z), 16,
+                               (Color){ 120, 220, 255, 255 }, 2.5f, 0.07f, 0.6f, false);
+            }
+        }
+    }
+    if (g.dropPickupFlash > 0) g.dropPickupFlash -= (float)g.dt;
+}
+
+void DropsDraw(Camera3D cam) {
+    (void)cam;
+    for (int i = 0; i < MAX_DROPS; i++) {
+        PowerDrop *d = &g.drops[i];
+        if (!d->alive) continue;
+        float bob = sinf((float)g.time * 3.0f + i) * 0.08f;
+        float fade = d->life < 5.0f ? (sinf((float)g.time * 8.0f) > 0 ? 1.0f : 0.35f) : 1.0f;
+        if (d->type == DROP_MAXAMMO) {
+            // glowing ammo crate
+            Vector3 c = Vec3(d->pos.x, d->pos.y + 0.45f + bob, d->pos.z);
+            GfxDrawCubePart(c, Vec3(0.42f, 0.30f, 0.42f), Vec3(0, d->spin, 0),
+                            (Color){ 60, 140, 200, (unsigned char)(235*fade) }, AssetsTex(TEX_BOX));
+            GfxDrawCubePart(Vec3(c.x, c.y + 0.17f, c.z), Vec3(0.30f, 0.06f, 0.30f), Vec3(0, d->spin, 0),
+                            (Color){ 150, 240, 255, (unsigned char)(235*fade) }, AssetsTex(TEX_GLASS));
+            ParticlesSpawn(Vec3(d->pos.x + RngRange(-0.2f, 0.2f), d->pos.y + 0.2f, d->pos.z + RngRange(-0.2f, 0.2f)),
+                           Vec3(0, RngRange(0.3f, 0.8f), 0), (Color){ 120, 220, 255, 255 }, 0.05f, 0.5f, false);
         }
     }
 }

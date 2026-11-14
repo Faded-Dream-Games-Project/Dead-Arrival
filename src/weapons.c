@@ -6,11 +6,41 @@
 #include "game.h"
 
 // ---------------------------------------------------------------------------
+// Gun viewmodel models (OBJ from assets/guns/, built by tools/gen_guns.py)
+// ---------------------------------------------------------------------------
+static Model sGunModels[NUM_GUN_SLOTS_MAX];
+static bool  sGunModelOk[NUM_GUN_SLOTS_MAX];
+
+void GunModelsInit(void) {
+    for (int i = 0; i < gGunCount; i++) {
+        sGunModelOk[i] = false;
+        char path[512];
+        snprintf(path, sizeof path, "%s/guns/%s.obj", DataDir(), gWeapons[i].modelId);
+        if (!FileExists(path)) {
+            printf("guns: WARNING no model for %s (%s)\n", gWeapons[i].name, path);
+            continue;
+        }
+        sGunModels[i] = LoadModel(path);
+        sGunModelOk[i] = sGunModels[i].meshCount > 0;
+        if (!sGunModelOk[i]) printf("guns: WARNING model failed to load: %s\n", path);
+    }
+}
+
+void GunModelsUnload(void) {
+    for (int i = 0; i < NUM_GUN_SLOTS_MAX; i++) {
+        if (sGunModelOk[i]) UnloadModel(sGunModels[i]);
+        sGunModelOk[i] = false;
+    }
+}
+
+bool GunModelValid(int widx) { return widx >= 0 && widx < gGunCount && sGunModelOk[widx]; }
+
+// ---------------------------------------------------------------------------
 // Give / switch weapons
 // ---------------------------------------------------------------------------
 void WeaponGive(int widx, bool fromBox) {
     Player *p = &g.player;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     // already owned -> refill
     for (int s = 0; s < 2; s++) {
         if (p->weapons[s].widx == widx) {
@@ -35,7 +65,7 @@ void WeaponRefillCurrent(void) {
     Player *p = &g.player;
     int widx = p->weapons[p->curSlot].widx;
     if (widx < 0) return;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     WeaponSlot *s = &p->weapons[p->curSlot];
     if (s->reserveAmmo < w->reserve) s->reserveAmmo = w->reserve;
 }
@@ -48,7 +78,7 @@ float WeaponSpreadCurrent(void) {
     Player *p = &g.player;
     int widx = p->weapons[p->curSlot].widx;
     if (widx < 0) return 0;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     float base = LERP(w->spread, w->adsSpread, p->adsBlend);
     if (p->grounded) base *= 1.0f; else base *= 1.8f;
     return base;
@@ -91,7 +121,7 @@ static void FireBullet(Vector3 origin, Vector3 dir, float dmg) {
 static void DoShot(void) {
     Player *p = &g.player;
     int widx = p->weapons[p->curSlot].widx;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     WeaponSlot *s = &p->weapons[p->curSlot];
     float dmg = (float)w->damage;
     // Pack-a-Punch: 2.5x damage, enough to keep pace past round 10's
@@ -100,7 +130,7 @@ static void DoShot(void) {
 
     // sound category
     int snd = SND_SHOT_LIGHT;
-    if (widx == W_L96A1 || widx == W_ENFIELD) snd = SND_SHOT_SNIPER;
+    if (w->mode == FIRE_BOLT || (w->pellets <= 1 && w->damage >= 240)) snd = SND_SHOT_SNIPER;
     else if (w->pellets > 1) snd = SND_SHOT_SHOTGUN;
     else if (w->damage >= 44) snd = SND_SHOT_HEAVY;
     SfxPlay(snd, RngRange(0.94f, 1.06f), 1.0f);
@@ -134,13 +164,13 @@ static void StartReload(void) {
     Player *p = &g.player;
     int widx = p->weapons[p->curSlot].widx;
     if (widx < 0) return;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     WeaponSlot *s = &p->weapons[p->curSlot];
     if (w->mode == FIRE_MELEE) return;
     if (p->reloadTimer > 0) return;
     if (s->magAmmo >= w->mag || s->reserveAmmo <= 0) return;
     float t = w->reloadTime;
-    if (p->perks[PERK_SWIFT]) t *= 0.6f;
+    if (PlayerHasPerk(PerkSwiftIndex())) t *= 0.6f;
     p->reloadTimer = t;
     SfxPlay(SND_RELOAD, 1.0f, 0.7f);
 }
@@ -179,7 +209,7 @@ static void KnifeHitCheck(void) {
     }
     if (best) {
         Vector3 hp = Vec3Add(origin, Vec3Scale(fwd, bestT*0.8f));
-        ZombieDamage(best, (float)WEAPONS[W_KNIFE].damage, hp, true);
+        ZombieDamage(best, (float)gWeapons[GunKnifeIndex()].damage, hp, true);
         g.hitMarker = 0.25f;
         ParticlesBurst(hp, 8, (Color){140, 25, 30, 255}, 2.5f, 0.08f, 0.5f, true);
         g.shakeTime = 0.08f; g.shakeAmp = 0.15f;
@@ -215,7 +245,7 @@ void WeaponsUpdate(void) {
 
     int widx = p->weapons[p->curSlot].widx;
     if (widx < 0) return;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
     WeaponSlot *s = &p->weapons[p->curSlot];
 
     // ADS blend
@@ -224,7 +254,7 @@ void WeaponsUpdate(void) {
 
     // timers
     float rpm = (float)w->rpm;
-    if (p->perks[PERK_RAPID]) rpm *= 1.25f;
+    if (PlayerHasPerk(PerkRapidIndex())) rpm *= 1.25f;
     p->fireTimer -= (float)g.dt;
     if (p->raiseTimer > 0) p->raiseTimer -= (float)g.dt;
     if (p->knifeTimer > 0) {
@@ -297,20 +327,21 @@ void WeaponsUpdate(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Viewmodel drawing (low-poly boxes in view space, drawn after world)
+// Viewmodel drawing: the OBJ model anchored to the camera basis
+// (same sway/bob/reload/raise animation the old box-drawn guns had)
 // ---------------------------------------------------------------------------
 void WeaponDrawViewmodel(Camera3D cam) {
     Player *p = &g.player;
     if (p->downed) return;
     int widx = p->weapons[p->curSlot].widx;
     if (widx < 0) return;
-    const WeaponDef *w = &WEAPONS[widx];
+    const WeaponDef *w = &gWeapons[widx];
 
     // sway from movement + bob
     float bobX = sinf(p->bobPhase) * 0.012f * (1.0f - p->adsBlend);
     float bobY = fabsf(cosf(p->bobPhase)) * 0.010f * (1.0f - p->adsBlend);
     float ads = p->adsBlend;
-    // base position: hip vs ads
+    // base position: hip vs ads (model origin = grip, so the grip sits here)
     float hipX = 0.22f, hipY = -0.20f, hipZ = 0.38f;
     float adsX = 0.0f,  adsY = -0.115f, adsZ = 0.26f;
     float px = LERP(hipX, adsX, ads) + bobX;
@@ -331,158 +362,102 @@ void WeaponDrawViewmodel(Camera3D cam) {
         swing = sinf(t * PI) * 1.0f;
     }
 
-    // We draw in world space anchored to camera to reuse the world shader.
-    // Build gun-space basis from camera yaw/pitch.
+    // gun-space basis from camera yaw/pitch (drawn through the world shader,
+    // so the gun is lit like the world and keeps its exact shape at any angle)
     float yawR = p->yaw*DEG2RAD, pitR = p->pitch*DEG2RAD;
     Vector3 fwd = Vec3(-sinf(yawR)*cosf(pitR), sinf(pitR), -cosf(yawR)*cosf(pitR));
     Vector3 right = Vec3Cross(Vec3(0,1,0), fwd);
     if (Vec3Len(right) < 1e-4f) right = Vec3(1,0,0); else right = Vec3Norm(right);
     Vector3 up = Vec3Cross(fwd, right);
     Vector3 eye = Vec3(p->pos.x, p->pos.y + PLAYER_EYE, p->pos.z);
-    // muzzle flash light
-    Vector3 muzzleWorld = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz + w->bodyLen)),
-        Vec3Scale(right, px)), Vec3Scale(up, py + 0.03f));
-    if (g.muzzleFlash > 0) GfxSetFlash(muzzleWorld, g.muzzleFlash * 14.0f);
+
+    Vector3 gripPos = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz)),
+        Vec3Scale(right, px)), Vec3Scale(up, py));
     (void)cam;
 
-    // helper: draw gun part in gun-space (x right, y up, z forward) -> world.
-    // Sizes go through the camera basis, never the world axes, so the gun
-    // keeps its exact shape at any yaw/pitch.
-    #define GUN_PART(cx, cy, cz, sx, sy, sz, tint) do { \
-        Vector3 _lp = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz + (cz))), \
-            Vec3Scale(right, px + (cx))), Vec3Scale(up, py + (cy))); \
-        GfxDrawCubeBasis(_lp, right, up, fwd, (sx), (sy), (sz), tint, AssetsTex(TEX_METAL)); \
-    } while (0)
+    // muzzle flash light at the model's muzzle
+    float mzLen = w->muzzleZ > 0 ? w->muzzleZ : (w->mode == FIRE_MELEE ? 0.3f : (0.6f + w->mag * 0.002f));
+    Vector3 muzzleWorld = Vec3Add(gripPos, Vec3Scale(fwd, mzLen));
+    if (g.muzzleFlash > 0) GfxSetFlash(muzzleWorld, g.muzzleFlash * 14.0f);
 
-    Color gunmetal = (Color){ 52, 54, 58, 255 };
-    Color dark     = (Color){ 34, 35, 38, 255 };
-    Color accent   = w->accent;
-
-    if (w->mode == FIRE_MELEE) {
-        // knife: blade + handle, swung
-        float kn = 0.30f + swing * 0.14f;
-        Vector3 lp = Vec3Add(Vec3Add(Vec3Add(eye, Vec3Scale(fwd, pz+0.18f - swing*0.1f)),
-            Vec3Scale(right, px + 0.04f - swing*0.12f)), Vec3Scale(up, py + 0.02f + swing*0.10f));
-        // handle
-        GfxDrawCubeBasis(lp, right, up, fwd, 0.030f, 0.030f, 0.11f, dark, AssetsTex(TEX_METAL));
-        // blade
-        Vector3 bp = Vec3Add(lp, Vec3Scale(fwd, 0.13f));
-        GfxDrawCubeBasis(bp, right, up, fwd, 0.012f, 0.045f, kn,
-                         (Color){200, 202, 208, 255}, AssetsTex(TEX_METAL));
+    if (!sGunModelOk[widx]) {
+        // no model (shouldn't happen; selftest checks): tiny dark box so the
+        // slot still reads as armed
+        GfxDrawCubeBasis(gripPos, right, up, fwd, 0.05f, 0.07f, 0.30f,
+                         (Color){ 52, 54, 58, 255 }, AssetsTex(TEX_METAL));
         return;
     }
 
-    // receiver
-    GUN_PART(0, 0.01f, w->bodyLen*0.5f, w->bodyW, w->bodyH, w->bodyLen, gunmetal);
-    // barrel
-    GUN_PART(0, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, w->barrelR*2, w->barrelR*2, w->barrelLen, dark);
-    // front sight
-    GUN_PART(0, w->bodyH*0.5f + w->sightH*0.5f, w->bodyLen + w->barrelLen*0.92f, 0.012f, w->sightH, 0.014f, dark);
-    // rear sight
-    GUN_PART(0, w->bodyH*0.5f + w->sightH*0.4f, 0.02f, 0.030f, w->sightH*0.6f, 0.012f, dark);
-    // magazine (skipped for revolver / double-barrel / tube-mag variants)
-    if (w->magH > 0 && w->shape != GUNSHAPE_TUBEMAG)
-        GUN_PART(0, -w->magH*0.5f - 0.01f, w->bodyLen*0.42f, w->magW, w->magH, w->magW*2.2f, accent);
-    // grip
-    GUN_PART(0, -0.055f, w->bodyLen*0.16f, 0.032f, 0.09f, 0.042f, accent);
-    // stock
-    if (w->stockLen > 0) GUN_PART(0, -0.01f, -w->stockLen*0.5f + 0.01f, 0.036f, 0.062f, w->stockLen, accent);
-    // pump for shotguns
-    if (w->mode == FIRE_PUMP) GUN_PART(0, w->bodyH*0.1f, w->bodyLen + w->barrelLen*0.35f, 0.045f, 0.038f, 0.13f, accent);
-    // scope for sniper
-    if (w->adsFov < 40) GUN_PART(0, w->bodyH*0.55f + 0.03f, w->bodyLen*0.5f, 0.026f, 0.026f, 0.16f, dark);
-
-    // ---- per-shape distinguishing parts ----
-    switch (w->shape) {
-    case GUNSHAPE_REVOLVER:
-        // cylinder where a magazine would be
-        GUN_PART(0, -0.012f, w->bodyLen*0.55f, 0.055f, 0.055f, 0.055f, dark);
-        // curved steel frame over the barrel
-        GUN_PART(0, w->bodyH*0.5f + 0.008f, w->bodyLen*0.6f + w->barrelLen*0.25f, 0.014f, 0.012f, w->barrelLen*0.5f, dark);
-        break;
-    case GUNSHAPE_BANANA:
-        // second curved mag block, swept forward like an AK banana mag
-        GUN_PART(0.008f, -w->magH*0.5f - 0.05f, w->bodyLen*0.42f + 0.045f, w->magW*0.9f, w->magH*0.75f, w->magW*2.0f, accent);
-        // wooden handguard ring around the barrel
-        GUN_PART(0, w->bodyH*0.28f, w->bodyLen + w->barrelLen*0.3f, 0.052f, 0.048f, w->barrelLen*0.3f, accent);
-        break;
-    case GUNSHAPE_DRUM:
-        // drum magazine: wide cylinder under the receiver (RPK / HK21 look)
-        GUN_PART(0, -w->magH*0.5f - 0.055f, w->bodyLen*0.4f, 0.10f, 0.085f, 0.115f, dark);
-        // bipod folded along the barrel
-        GUN_PART(0.028f, w->bodyH*0.3f, w->bodyLen + w->barrelLen*0.55f, 0.012f, 0.012f, w->barrelLen*0.3f, dark);
-        GUN_PART(-0.028f, w->bodyH*0.3f, w->bodyLen + w->barrelLen*0.55f, 0.012f, 0.012f, w->barrelLen*0.3f, dark);
-        break;
-    case GUNSHAPE_WINGS:
-        // heat-shield fins flanking the barrel
-        GUN_PART( 0.03f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, 0.010f, 0.034f, w->barrelLen*0.8f, dark);
-        GUN_PART(-0.03f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, 0.010f, 0.034f, w->barrelLen*0.8f, dark);
-        // top charging handle
-        GUN_PART(0, w->bodyH*0.5f + 0.012f, w->bodyLen*0.3f, 0.016f, 0.014f, 0.06f, dark);
-        break;
-    case GUNSHAPE_FOLDSTOCK:
-        // folded stock strut sticking back over the receiver
-        GUN_PART(0, w->bodyH*0.45f, -w->stockLen*0.5f - 0.02f, 0.020f, 0.018f, w->stockLen*0.8f, dark);
-        // vertical foregrip ahead of the mag
-        GUN_PART(0, -0.065f, w->bodyLen*0.72f, 0.024f, 0.07f, 0.030f, accent);
-        break;
-    case GUNSHAPE_DOUBLEBARREL:
-        // twin barrels side by side
-        GUN_PART( 0.019f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, w->barrelR*1.7f, w->barrelR*1.7f, w->barrelLen, dark);
-        GUN_PART(-0.019f, w->bodyH*0.25f, w->bodyLen + w->barrelLen*0.5f, w->barrelR*1.7f, w->barrelR*1.7f, w->barrelLen, dark);
-        // silver break-action hinge
-        GUN_PART(0, 0.0f, w->bodyLen*0.85f, 0.058f, 0.045f, 0.03f, ((Color){160,160,168,255}));        break;
-    case GUNSHAPE_TUBEMAG:
-        // under-barrel shell tube
-        GUN_PART(0, -w->bodyH*0.42f, w->bodyLen + w->barrelLen*0.45f, 0.036f, 0.036f, w->barrelLen*0.7f, dark);
-        // shell carrier latch
-        GUN_PART(0, -w->bodyH*0.42f, w->bodyLen + w->barrelLen*0.15f, 0.046f, 0.02f, 0.03f, accent);
-        break;
-    case GUNSHAPE_UNDERSLUNG:
-        // fat grenade tube under the barrel
-        GUN_PART(0, -w->bodyH*0.5f, w->bodyLen + w->barrelLen*0.4f, 0.062f, 0.062f, w->barrelLen*0.62f, dark);
-        break;
-    case GUNSHAPE_CARRYHANDLE:
-        // carry handle over the receiver
-        GUN_PART(0, w->bodyH*0.5f + 0.035f, w->bodyLen*0.5f, 0.020f, 0.026f, w->bodyLen*0.55f, dark);
-        // front sight tower on the barrel
-        GUN_PART(0, w->bodyH*0.35f + w->sightH*0.5f, w->bodyLen + w->barrelLen*0.8f, 0.026f, w->sightH, 0.026f, dark);
-        break;
-    case GUNSHAPE_BULLPUP:
-        // magazine behind the grip, inside the stock shell
-        GUN_PART(0, -0.055f, -w->bodyLen*0.22f, 0.044f, 0.15f, 0.058f, accent);
-        // cheek riser on top of the stock
-        GUN_PART(0, w->bodyH*0.5f, -w->bodyLen*0.25f, 0.030f, 0.02f, w->bodyLen*0.3f, dark);
-        // forward pistol grip
-        GUN_PART(0, -0.07f, w->bodyLen*0.55f, 0.022f, 0.075f, 0.028f, dark);
-        break;
-    case GUNSHAPE_SNIPERBOLT:
-        // bolt handle on the right side
-        GUN_PART(0.05f, w->bodyH*0.2f, w->bodyLen*0.35f, 0.05f, 0.012f, 0.012f, dark);
-        // scope rings
-        GUN_PART(0, w->bodyH*0.5f + 0.005f, w->bodyLen*0.3f, 0.032f, 0.02f, 0.024f, dark);
-        GUN_PART(0, w->bodyH*0.5f + 0.005f, w->bodyLen*0.68f, 0.032f, 0.02f, 0.024f, dark);
-        break;
-    case GUNSHAPE_BASIC:
-    default:
-        break;
+    // knife swings around the grip; guns get a slight roll while sprinting
+    float rotY = 0, rotZ = 0, rotX = 0;
+    if (w->mode == FIRE_MELEE) {
+        gripPos = Vec3Add(gripPos, Vec3Add(Vec3Scale(fwd, -swing*0.1f),
+                          Vec3Add(Vec3Scale(right, -swing*0.12f), Vec3Scale(up, swing*0.10f))));
+        rotZ = swing * -35.0f;
+    } else if (p->sprintTime > 0.05f && ads < 0.3f) {
+        rotZ = 12.0f; rotY = -8.0f;
     }
-    #undef GUN_PART
+
+    // build the model transform from the basis (right/up/fwd map gun-space
+    // x/y/z; +Z forward matches the generator's convention)
+    Matrix mat;
+    mat.m0 = right.x; mat.m4 = up.x; mat.m8 = fwd.x; mat.m12 = gripPos.x;
+    mat.m1 = right.y; mat.m5 = up.y; mat.m9 = fwd.y; mat.m13 = gripPos.y;
+    mat.m2 = right.z; mat.m6 = up.z; mat.m10 = fwd.z; mat.m14 = gripPos.z;
+    mat.m3 = 0; mat.m7 = 0; mat.m11 = 0; mat.m15 = 1;
+    // gun-space rotations (deg) around the grip
+    if (rotZ != 0) mat = MatrixMultiply(MatrixRotate(fwd, rotZ*DEG2RAD), mat);
+    if (rotY != 0) mat = MatrixMultiply(MatrixRotate(up, rotY*DEG2RAD), mat);
+    if (rotX != 0) mat = MatrixMultiply(MatrixRotate(right, rotX*DEG2RAD), mat);
+
+    // Skin tint: WHITE keeps the MTL colors, colored skins multiply them.
+    // Materials are emitted in first-use order (body, dark, then accents);
+    // tint by slot order matches that. All parts go through the shared
+    // world-shader material so the gun is lit with the scene.
+    const SkinDef *skin = SkinCurrent();
+    Model model = sGunModels[widx];
+    Material *gm = GfxScratchMaterial();
+    for (int mi = 0; mi < model.meshCount; mi++) {
+        // material index -> slot color (models map every part to one of
+        // body/dark/accent/silver by part kind)
+        Color t = skin->body;
+        if (mi >= 1 && model.meshCount > 2) t = (mi == 1) ? skin->dark : skin->accent;
+        else if (mi == 1) t = skin->dark;
+        // OBJ loader gives each part its own material index in file order
+        if (model.materials && mi < model.materialCount) {
+            Color base = model.materials[mi].maps
+                         ? model.materials[mi].maps[MATERIAL_MAP_DIFFUSE].color
+                         : WHITE;
+            // multiply base MTL color by the skin tint channel
+            t = (Color){ (unsigned char)(base.r * t.r / 255),
+                         (unsigned char)(base.g * t.g / 255),
+                         (unsigned char)(base.b * t.b / 255), 255 };
+        }
+        gm->maps[MATERIAL_MAP_DIFFUSE].texture = AssetsTex(TEX_METAL);
+        gm->maps[MATERIAL_MAP_DIFFUSE].color = t;
+        GfxSetTint(t);
+        DrawMesh(model.meshes[mi], *gm, mat);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Mystery box
 // ---------------------------------------------------------------------------
 static int BoxPickWeapon(void) {
-    // weighted pick among boxWeight > 0
+    // weighted pick among boxWeight > 0 (knife excluded)
+    int knife = GunKnifeIndex();
     int total = 0;
-    for (int i = 0; i < NUM_GUNS; i++) total += WEAPONS[i].boxWeight;
+    for (int i = 0; i < gGunCount; i++)
+        if (i != knife) total += gWeapons[i].boxWeight;
     int r = RngInt(total);
-    for (int i = 0; i < NUM_GUNS; i++) {
-        r -= WEAPONS[i].boxWeight;
+    for (int i = 0; i < gGunCount; i++) {
+        if (i == knife) continue;
+        r -= gWeapons[i].boxWeight;
         if (r < 0) return i;
     }
-    return W_M1911;
+    for (int i = 0; i < gGunCount; i++)
+        if (i != knife && gWeapons[i].boxWeight > 0) return i;
+    return 0;
 }
 
 void BoxUpdate(void) {
@@ -532,6 +507,6 @@ void BoxDrawWorld(void) {
         float rise = t < 0.15f ? t/0.15f : 1.0f;
         Vector3 bp = g.map.boxPos;
         GfxDrawCubePart(Vec3(bp.x, bp.y + 0.8f + rise*0.5f, bp.z), Vec3(0.10f, 0.35f, 0.10f), Vec3(0, g.time*90, 0),
-                        WEAPONS[g.boxResultWeapon].accent, AssetsTex(TEX_METAL));
+                        gWeapons[g.boxResultWeapon].accent, AssetsTex(TEX_METAL));
     }
 }
