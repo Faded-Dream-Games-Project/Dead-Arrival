@@ -1,0 +1,96 @@
+# ============================================================================
+# Dead Arrival map: THEATER OF THE DAMNED
+# An abandoned playhouse. Zombies pour through the boarded windows.
+# spawn_mode = barriers  -> zombies tear through boards at the barriers
+# ============================================================================
+name = Theater of the Damned
+desc = The final curtain never falls
+author = Faded Dream
+spawn_mode = barriers
+ambient = 205 195 180
+sky = 8 8 12
+player_spawn = 0 0 5 90
+
+# ---- floor / ceiling ----
+box = 0 -0.5 0 26 0.5 18 floor_wood
+box = 0 3.2 0 26 0.4 18 roof_wood
+
+# ---- south wall (solid) ----
+box = 0 0 9.25 26 3.2 0.5 wall_brick
+
+# ---- north wall with backstage door (gap x 9.3..11.7) ----
+box = -1.85 0 -9.25 22.3 3.2 0.5 wall_brick
+box = 12.35 0 -9.25 1.3 3.2 0.5 wall_brick
+box = 10.5 2.1 -9.25 2.4 1.1 0.5 wall_brick
+barrier = 10.5 0 -9.25 1 2.4
+
+# ---- west wall with lobby door (gap z -1.3..1.3) ----
+box = -13.25 0 -5.15 0.5 3.2 7.7 wall_brick
+box = -13.25 0 5.15 0.5 3.2 7.7 wall_brick
+box = -13.25 2.1 0 0.5 1.1 2.6 wall_brick
+barrier = -13.25 0 0 3 2.6
+
+# ---- east wall with two windows (gaps z -4.2..-1.8 and z 2.8..5.2) ----
+box = 13.25 0 -6.6 0.5 3.2 4.8 wall_brick
+box = 13.25 0 0.5 0.5 3.2 4.6 wall_brick
+box = 13.25 0 7.1 0.5 3.2 3.8 wall_brick
+box = 13.25 2.1 -3 0.5 1.1 2.4 wall_brick
+box = 13.25 2.1 4 0.5 1.1 2.4 wall_brick
+barrier = 13.25 0 -3 2 2.4
+barrier = 13.25 0 4 2 2.4
+
+# ---- outside aprons (visual, behind the barriers) ----
+box = 14.35 -0.5 -3 1.6 0.5 3.2 floor_stone
+box = 14.35 -0.5 4 1.6 0.5 3.2 floor_stone
+box = -14.35 -0.5 0 1.6 0.5 3.4 floor_stone
+box = 10.5 -0.5 -10.35 3.2 0.5 1.6 floor_stone
+
+# ---- stage (north end) ----
+box = 0 0 -6.5 18 1 5 stage_wood
+box = 0 1 -8.9 12 2.2 0.3 curtain_red
+box = -8.7 1 -6.5 0.6 2.2 5 curtain_red
+box = 8.7 1 -6.5 0.6 2.2 5 curtain_red
+
+# ---- seating rows ----
+box = -10 0 1.5 2.2 0.5 0.9 seat_red
+box = -7.5 0 1.5 2.2 0.5 0.9 seat_red
+box = -5 0 1.5 2.2 0.5 0.9 seat_red
+box = -2.5 0 1.5 2.2 0.5 0.9 seat_red
+box = 2.5 0 1.5 2.2 0.5 0.9 seat_red
+box = 5 0 1.5 2.2 0.5 0.9 seat_red
+box = 7.5 0 1.5 2.2 0.5 0.9 seat_red
+box = 10 0 1.5 2.2 0.5 0.9 seat_red
+box = -10 0 3.5 2.2 0.5 0.9 seat_red
+box = -7.5 0 3.5 2.2 0.5 0.9 seat_red
+box = -5 0 3.5 2.2 0.5 0.9 seat_red
+box = -2.5 0 3.5 2.2 0.5 0.9 seat_red
+box = 2.5 0 3.5 2.2 0.5 0.9 seat_red
+box = 5 0 3.5 2.2 0.5 0.9 seat_red
+box = 7.5 0 3.5 2.2 0.5 0.9 seat_red
+box = 10 0 3.5 2.2 0.5 0.9 seat_red
+box = -10 0 5.5 2.2 0.5 0.9 seat_red
+box = -7.5 0 5.5 2.2 0.5 0.9 seat_red
+box = -5 0 5.5 2.2 0.5 0.9 seat_red
+box = -2.5 0 5.5 2.2 0.5 0.9 seat_red
+box = 2.5 0 5.5 2.2 0.5 0.9 seat_red
+box = 5 0 5.5 2.2 0.5 0.9 seat_red
+box = 7.5 0 5.5 2.2 0.5 0.9 seat_red
+box = 10 0 5.5 2.2 0.5 0.9 seat_red
+box = -10 0 7.5 2.2 0.5 0.9 seat_red
+box = -7.5 0 7.5 2.2 0.5 0.9 seat_red
+box = -5 0 7.5 2.2 0.5 0.9 seat_red
+box = -2.5 0 7.5 2.2 0.5 0.9 seat_red
+box = 2.5 0 7.5 2.2 0.5 0.9 seat_red
+box = 5 0 7.5 2.2 0.5 0.9 seat_red
+box = 7.5 0 7.5 2.2 0.5 0.9 seat_red
+box = 10 0 7.5 2.2 0.5 0.9 seat_red
+
+# ---- wall buys ----
+wallbuy = -12.9 1.6 3 2 kar98k 200
+wallbuy = 13.05 1.6 0.5 3 thompson 1400
+wallbuy = 4 1.8 -8.95 0 trench_gun 1500
+wallbuy = -3 1.6 8.95 1 sten 1000
+wallbuy = -8 1.6 8.95 1 carbine 500
+
+# ---- mystery box on the stage ----
+mysterybox = 0 1.35 -6.5

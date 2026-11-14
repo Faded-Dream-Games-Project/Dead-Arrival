@@ -1,0 +1,101 @@
+# ============================================================================
+# Dead Arrival map: HOLLOW LINE
+# A great war trench network with two bunkers. Movement is tight.
+# spawn_mode = drop  -> zombies drop in from the parapets above
+# ============================================================================
+name = Hollow Line
+desc = They come from above
+author = Faded Dream
+spawn_mode = drop
+ambient = 150 142 128
+sky = 24 25 27
+player_spawn = 0 -2.2 -7.8 270
+
+# ---- trench floor slab (top at -2.4) ----
+box = 0 -2.9 0 28 0.5 18 floor_mud
+
+# ---- outer berm ring (top at 0), west/east split around bunker recesses ----
+box = 0 -3 -11.5 28 3 5 trench_wall
+box = 0 -3 11.5 28 3 5 trench_wall
+box = -13 -3 -5.6 2 3 6.8 trench_wall
+box = -13 -3 5.6 2 3 6.8 trench_wall
+box = 13 -3 -5.6 2 3 6.8 trench_wall
+box = 13 -3 5.6 2 3 6.8 trench_wall
+
+# ---- central island (top at 0): the no man's land you can climb onto ----
+box = 0 -3 0 19.2 3 13.2 trench_wall
+
+# ---- west bunker (dug into the berm): back wall + roof ----
+box = -14.05 -2.9 0 0.7 3 4.6 trench_wall
+box = -13 -0.4 0 2.6 0.4 4.6 trench_wall
+box = -13.5 -2.4 1.5 0.7 0.9 0.7 crate_wood
+box = -13.5 -2.4 -1.5 0.7 0.9 0.7 crate_wood
+
+# ---- east bunker ----
+box = 14.05 -2.9 0 0.7 3 4.6 trench_wall
+box = 13 -0.4 0 2.6 0.4 4.6 trench_wall
+box = 13.5 -2.4 1.5 0.7 0.9 0.7 crate_wood
+box = 13.5 -2.4 -1.5 0.7 0.9 0.7 crate_wood
+
+# ---- field boundary walls (on top of the berms) ----
+box = 0 0 -14.3 30 4 0.4 trench_wall
+box = 0 0 14.3 30 4 0.4 trench_wall
+box = -14.3 0 0 0.4 4 30 trench_wall
+box = 14.3 0 0 0.4 4 30 trench_wall
+
+# ---- sandbags on the island rim ----
+box = -6 0 -6.35 3 0.5 0.6 sandbag
+box = 6 0 -6.35 3 0.5 0.6 sandbag
+box = -6 0 6.35 3 0.5 0.6 sandbag
+box = 6 0 6.35 3 0.5 0.6 sandbag
+box = -9.35 0 -3 0.6 0.5 3 sandbag
+box = -9.35 0 3 0.6 0.5 3 sandbag
+box = 9.35 0 -3 0.6 0.5 3 sandbag
+box = 9.35 0 3 0.6 0.5 3 sandbag
+
+# ---- duckboards along the trench floor ----
+box = 0 -2.4 -7.8 20 0.12 1 duckboard
+box = 0 -2.4 7.8 20 0.12 1 duckboard
+box = -10.8 -2.4 0 1 0.12 13.2 duckboard
+box = 10.8 -2.4 0 1 0.12 13.2 duckboard
+
+# ---- stairs: trench north -> island (6 steps, 0.4m each) ----
+box = 0 -2.4 -9.35 2.4 0.4 0.5 duckboard
+box = 0 -2 -8.85 2.4 0.4 0.5 duckboard
+box = 0 -1.6 -8.35 2.4 0.4 0.5 duckboard
+box = 0 -1.2 -7.85 2.4 0.4 0.5 duckboard
+box = 0 -0.8 -7.35 2.4 0.4 0.5 duckboard
+box = 0 -0.4 -6.85 2.4 0.4 0.5 duckboard
+
+# ---- stairs: island -> trench south ----
+box = 0 -2.4 9.35 2.4 0.4 0.5 duckboard
+box = 0 -2 8.85 2.4 0.4 0.5 duckboard
+box = 0 -1.6 8.35 2.4 0.4 0.5 duckboard
+box = 0 -1.2 7.85 2.4 0.4 0.5 duckboard
+box = 0 -0.8 7.35 2.4 0.4 0.5 duckboard
+box = 0 -0.4 6.85 2.4 0.4 0.5 duckboard
+
+# ---- drop points: zombies fall in from the parapets ----
+drop = 0 0 -11.5
+drop = -6 0 -11.5
+drop = 6 0 -11.5
+drop = 0 0 11.5
+drop = -6 0 11.5
+drop = 6 0 11.5
+drop = -13 0 -5.5
+drop = -13 0 5.5
+drop = 13 0 -5.5
+drop = 13 0 5.5
+
+# ---- wall buys (chalk marks on the trench walls) ----
+wallbuy = 3 -1.2 -6.55 1 kar98k 200
+wallbuy = -2.5 -1.2 6.55 0 mp40 1200
+wallbuy = 2.5 -1.2 6.55 0 stg44 1800
+wallbuy = 9.55 -1.2 3 2 trench_gun 1500
+wallbuy = -9.55 -1.2 -3 3 thompson 1400
+wallbuy = -13.65 -1.2 0 2 mosin 250
+wallbuy = 13.65 -1.2 0 3 double_barrel 1200
+
+# ---- mystery boxes inside the bunkers ----
+mysterybox = -13 -2.05 0
+mysterybox = 13 -2.05 0

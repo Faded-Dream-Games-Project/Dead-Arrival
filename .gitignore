@@ -1,0 +1,24 @@
+# Build output
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.exe
+
+# Dependencies fetched by `make deps` / CMake
+deps/
+
+# Generated / user files
+settings.ini
+*.log
+autotest_*.png
+shots/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+deps-cloned

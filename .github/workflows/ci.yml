@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libasound2-dev libx11-dev libxcursor-dev libxi-dev \
+            libxinerama-dev libxrandr-dev libgl-dev \
+            xvfb mesa-utils
+
+      - name: Verify assets exist
+        run: python3 tools/gen_assets.py --check
+
+      - name: Build raylib 6.2 + game
+        run: |
+          make deps -j"$(nproc)"
+          make -j"$(nproc)"
+
+      - name: Map discovery check
+        run: ./build/dead_arrival --list-maps
+
+      - name: Headless autotest (all maps)
+        run: |
+          mkdir -p artifacts
+          for m in theater cemetery trenches; do
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+              ./build/dead_arrival --autotest "$m.map" 1800 "artifacts/$m.png"
+          done
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotest-screenshots
+          path: artifacts/
