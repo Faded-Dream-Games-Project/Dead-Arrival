@@ -80,7 +80,7 @@ static void player_move(float dt)
     // input direction
     float fwd = 0, strafe = 0;
     bool sprint = false;
-    if (g.autotest)
+    if (g.autotest && !g.pathtest)
     {
         fwd = 1;   // scripted headless walk (yaw is overridden by the caller)
     }
@@ -844,7 +844,7 @@ void player_update(float dt, bool input_enabled)
     g_player.recoil = lerpf(g_player.recoil, 0, clampf(dt * 6.0f, 0, 1));
 
     // ---- move ----
-    if (g.autotest)
+    if (g.autotest && !g.pathtest)
     {
         // walk forward slowly so the camera tours the map
         float save_yaw = g_player.yaw;
@@ -890,7 +890,7 @@ void player_update(float dt, bool input_enabled)
     if (!input_enabled) { player_update_camera(dt); return; }
 
     // ---- actions ----
-    if (g.autotest)
+    if (g.autotest && !g.pathtest)
     {
         // fire periodically; aim at the nearest zombie so the combat path
         // (hitscan -> damage -> points -> kills) is exercised on every map

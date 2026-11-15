@@ -3,6 +3,11 @@
 # A great war trench network with two deep bunkers. You can never leave
 # the line: there are no stairs up, the parapets are too tall to climb.
 # spawn_mode = drop  -> zombies drop in from the parapets above
+#
+# Layout (north to south, trench floor tops at -2.65, berm tops at 0):
+#   outer parapet -> reserve trench -> berm w/ comm links -> main trench
+#   -> berm w/ comm links -> reserve trench -> outer parapet
+# Two bunkers are dug into the berm at the east/west ends of the main trench.
 # ============================================================================
 name = Hollow Line
 desc = They come from above
@@ -12,67 +17,69 @@ ambient = 150 142 128
 sky = 24 25 27
 player_spawn = -15 -2.65 0 180
 
-# ---- trench + bunker floor slab (top at -2.65) ----
-box = 0 -2.9 0 34 0.5 24 floor_mud
+# ---- trench + bunker floor slab (bottom -3.15, top at -2.65) ----
+box = 0 -3.15 0 34 0.5 24 floor_mud
 
-# ---- berm fill: everything except the trench network (top at 0) ----
-# north / south parapet strips
-box = 0 -1.5 -9.25 34 3 5.5 trench_wall
-box = 0 -1.5 9.25 34 3 5.5 trench_wall
-# between the main trench and the north reserve trench (gaps = comm links)
-box = -14.5 -1.5 -6 5 3 1 trench_wall
-box = -9 -1.5 -5 6 3 3 trench_wall
-box = 0 -1.5 -5 6 3 3 trench_wall
-box = 9 -1.5 -5 6 3 3 trench_wall
-box = 14.5 -1.5 -6 5 3 1 trench_wall
-# between the main trench and the south reserve trench
-box = -14.5 -1.5 6 5 3 1 trench_wall
-box = -9 -1.5 5 6 3 3 trench_wall
-box = 0 -1.5 5 6 3 3 trench_wall
-box = 9 -1.5 5 6 3 3 trench_wall
-box = 14.5 -1.5 6 5 3 1 trench_wall
+# ---- berm fill: sits on the floor (bottom -2.65), tops at 0 ----
+# outer parapets beyond the reserve trenches
+box = 0 -2.65 -10.85 34 2.65 2.3 trench_wall
+box = 0 -2.65 10.85 34 2.65 2.3 trench_wall
+# berm between the main trench and the north reserve trench (gaps = comm links)
+box = -14.5 -2.65 -5.875 5 2.65 1.25 trench_wall
+box = -9 -2.65 -5 6 2.65 3 trench_wall
+box = 0 -2.65 -5 6 2.65 3 trench_wall
+box = 9 -2.65 -5 6 2.65 3 trench_wall
+box = 14.5 -2.65 -5.875 5 2.65 1.25 trench_wall
+# berm between the main trench and the south reserve trench
+box = -14.5 -2.65 5.875 5 2.65 1.25 trench_wall
+box = -9 -2.65 5 6 2.65 3 trench_wall
+box = 0 -2.65 5 6 2.65 3 trench_wall
+box = 9 -2.65 5 6 2.65 3 trench_wall
+box = 14.5 -2.65 5.875 5 2.65 1.25 trench_wall
 # trench end walls (also the bunker back walls)
-box = -17.25 -1.5 0 0.5 3 24 trench_wall
-box = 17.25 -1.5 0 0.5 3 24 trench_wall
+box = -17.25 -2.65 0 0.5 2.65 24 trench_wall
+box = 17.25 -2.65 0 0.5 2.65 24 trench_wall
 
-# ---- field boundary walls on top of the parapets ----
-box = 0 0 -12.3 35 4 0.4 trench_wall
-box = 0 0 12.3 35 4 0.4 trench_wall
-box = -17.5 0 0 0.4 4 25 trench_wall
-box = 17.5 0 0 0.4 4 25 trench_wall
+# ---- field boundary walls on the very edge of the parapets ----
+box = 0 0 -11.8 35 4 0.4 trench_wall
+box = 0 0 11.8 35 4 0.4 trench_wall
+box = -17.25 0 0 0.5 4 24 trench_wall
+box = 17.25 0 0 0.5 4 24 trench_wall
 
-# ---- sandbags along the parapet rims (decoration, unreachable) ----
-box = -5 0 -6.7 4 0.5 0.6 sandbag
-box = 5 0 -6.7 4 0.5 0.6 sandbag
-box = -5 0 6.7 4 0.5 0.6 sandbag
-box = 5 0 6.7 4 0.5 0.6 sandbag
-box = -9.7 0 -8.25 0.6 0.5 3 sandbag
-box = 9.7 0 -8.25 0.6 0.5 3 sandbag
-box = -9.7 0 8.25 0.6 0.5 3 sandbag
-box = 9.7 0 8.25 0.6 0.5 3 sandbag
+# ---- sandbags along the trench rims (decoration, unreachable) ----
+# rims of the comm berms, overlooking the main trench
+box = -5 0 -3.8 4 0.5 0.6 sandbag
+box = 5 0 -3.8 4 0.5 0.6 sandbag
+box = -5 0 3.8 4 0.5 0.6 sandbag
+box = 5 0 3.8 4 0.5 0.6 sandbag
+# rims of the outer parapets, overlooking the reserve trenches
+box = -9.7 0 -10.5 0.6 0.5 1.6 sandbag
+box = 9.7 0 -10.5 0.6 0.5 1.6 sandbag
+box = -9.7 0 10.5 0.6 0.5 1.6 sandbag
+box = 9.7 0 10.5 0.6 0.5 1.6 sandbag
 
 # ---- WEST BUNKER: two rooms dug into the berm, with a dividing wall ----
-box = -14.5 -0.45 0 4 0.4 10.5 trench_wall
-box = -14.5 -1.65 3.25 0.5 2 3.5 trench_wall
-box = -14.5 -1.65 -3.25 0.5 2 3.5 trench_wall
+box = -14.5 -0.65 0 4 0.65 10.5 trench_wall
+box = -14.5 -2.65 3.25 0.5 2.0 3.5 trench_wall
+box = -14.5 -2.65 -3.25 0.5 2.0 3.5 trench_wall
 box = -15.8 -2.65 4.6 0.7 0.9 0.7 crate_wood
 box = -15.8 -2.65 -4.6 0.7 0.9 0.7 crate_wood
 
 # ---- EAST BUNKER: same layout ----
-box = 14.5 -0.45 0 4 0.4 10.5 trench_wall
-box = 14.5 -1.65 3.25 0.5 2 3.5 trench_wall
-box = 14.5 -1.65 -3.25 0.5 2 3.5 trench_wall
+box = 14.5 -0.65 0 4 0.65 10.5 trench_wall
+box = 14.5 -2.65 3.25 0.5 2.0 3.5 trench_wall
+box = 14.5 -2.65 -3.25 0.5 2.0 3.5 trench_wall
 box = 15.8 -2.65 4.6 0.7 0.9 0.7 crate_wood
 box = 15.8 -2.65 -4.6 0.7 0.9 0.7 crate_wood
 
-# ---- duckboards along the trench floors ----
-box = 0 -2.4 0 30 0.12 1.2 duckboard
-box = 0 -2.4 -8.25 17 0.12 1 duckboard
-box = 0 -2.4 8.25 17 0.12 1 duckboard
-box = -4.5 -2.4 -5 1 0.12 3 duckboard
-box = 4.5 -2.4 -5 1 0.12 3 duckboard
-box = -4.5 -2.4 5 1 0.12 3 duckboard
-box = 4.5 -2.4 5 1 0.12 3 duckboard
+# ---- duckboards along the trench floors (on the floor, top at -2.53) ----
+box = 0 -2.65 0 30 0.12 1.2 duckboard
+box = 0 -2.65 -8.25 17 0.12 1 duckboard
+box = 0 -2.65 8.25 17 0.12 1 duckboard
+box = -4.5 -2.65 -5 1 0.12 3 duckboard
+box = 4.5 -2.65 -5 1 0.12 3 duckboard
+box = -4.5 -2.65 5 1 0.12 3 duckboard
+box = 4.5 -2.65 5 1 0.12 3 duckboard
 
 # ---- drop points: zombies fall in from the parapets ----
 drop = -6 0 -7
@@ -111,4 +118,4 @@ pap = 15.8 -2.65 -2.5
 
 # ---- mystery boxes (one per bunker) ----
 mysterybox = -15.8 -2.30 2.5
-mysterybox = 15.8 -2.30 -4.8
+mysterybox = 13.4 -2.30 3.2

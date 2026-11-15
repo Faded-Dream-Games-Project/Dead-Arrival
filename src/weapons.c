@@ -123,7 +123,9 @@ int weapons_load(const char *path)
         if (w->rpm < 1) w->rpm = 60;
         if (w->pellets < 1) w->pellets = 1;
         if (w->penetrate < 1) w->penetrate = 1;
-        if (!w->name[0]) snprintf(w->name, sizeof(w->name), "%s", w->id);
+        // precision caps the copy at the destination size (silences
+        // -Wformat-truncation: id is 64 bytes, name only 48)
+        if (!w->name[0]) snprintf(w->name, sizeof(w->name), "%.47s", w->id);
     }
 
     TraceLog(LOG_INFO, "WEAPONS: %d weapons loaded from %s", g_weapon_count, path);

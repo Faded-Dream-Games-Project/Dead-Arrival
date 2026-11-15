@@ -39,6 +39,13 @@ jobs:
               ./build/dead_arrival --autotest "$m.map" 1800 "artifacts/$m.png"
           done
 
+      - name: Zombie pathfinding test (all maps)
+        run: |
+          for m in theater cemetery trenches; do
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+              ./build/dead_arrival --pathtest "$m.map" 75 "artifacts/path_$m.png"
+          done
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4

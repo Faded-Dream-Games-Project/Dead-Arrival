@@ -453,6 +453,30 @@ static bool try_step_up(GameMap *m, Vector3 *pos, float radius, float height,
     return true;
 }
 
+// Resolve one horizontal axis against a blocker AABB. When the entity is
+// moving, push it back against the motion; when it is stationary (spawn
+// points, scripted moves), pop it out on the NEAREST side - pushing to the
+// max face unconditionally would teleport an embedded entity across the
+// whole map (seen as "spawned outside the map").
+static void resolve_axis(int axis, Vector3 *pos, float *vel, float radius,
+                         BoundingBox bb)
+{
+    float p = (axis == 0) ? pos->x : pos->z;
+    float lo = (axis == 0) ? bb.min.x : bb.min.z;
+    float hi = (axis == 0) ? bb.max.x : bb.max.z;
+    float v = *vel;
+
+    if (v > 0)   p = lo - radius - 0.001f;
+    else if (v < 0) p = hi + radius + 0.001f;
+    else
+    {
+        float dmin = p - lo, dmax = hi - p;
+        p = (dmin < dmax) ? lo - radius - 0.001f : hi + radius + 0.001f;
+    }
+    if (axis == 0) { pos->x = p; *vel = 0; }
+    else           { pos->z = p; *vel = 0; }
+}
+
 bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
                    float radius, float height, float step_height, bool *on_ground)
 {
@@ -467,9 +491,17 @@ bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
         BoundingBox e = entity_bb(*pos, radius, height);
         if (!bb_overlap(e, bb)) continue;
         if (try_step_up(m, pos, radius, height, step_height, bb)) continue;
-        if (vel->x > 0) pos->x = bb.min.x - radius - 0.001f;
-        else            pos->x = bb.max.x + radius + 0.001f;
-        vel->x = 0;
+        resolve_axis(0, pos, &vel->x, radius, bb);
+        collided = true;
+    }
+    // closed buyable doors are solid for every entity (zombies included)
+    for (int i = 0; i < m->door_count; i++)
+    {
+        if (m->doors[i].open) continue;
+        BoundingBox bb = door_bb(&m->doors[i]);
+        BoundingBox e = entity_bb(*pos, radius, height);
+        if (!bb_overlap(e, bb)) continue;
+        resolve_axis(0, pos, &vel->x, radius, bb);
         collided = true;
     }
 
@@ -481,9 +513,16 @@ bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
         BoundingBox e = entity_bb(*pos, radius, height);
         if (!bb_overlap(e, bb)) continue;
         if (try_step_up(m, pos, radius, height, step_height, bb)) continue;
-        if (vel->z > 0) pos->z = bb.min.z - radius - 0.001f;
-        else            pos->z = bb.max.z + radius + 0.001f;
-        vel->z = 0;
+        resolve_axis(1, pos, &vel->z, radius, bb);
+        collided = true;
+    }
+    for (int i = 0; i < m->door_count; i++)
+    {
+        if (m->doors[i].open) continue;
+        BoundingBox bb = door_bb(&m->doors[i]);
+        BoundingBox e = entity_bb(*pos, radius, height);
+        if (!bb_overlap(e, bb)) continue;
+        resolve_axis(1, pos, &vel->z, radius, bb);
         collided = true;
     }
 
@@ -523,6 +562,21 @@ bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
         }
     }
     return collided;
+}
+
+// Would an entity with this AABB fit at pos without overlapping anything?
+// (nav/steering probe for choosing wall-slide directions)
+bool map_body_fits(GameMap *m, Vector3 pos, float radius, float height)
+{
+    BoundingBox e = entity_bb(pos, radius, height);
+    for (int i = 0; i < m->box_count; i++)
+        if (bb_overlap(e, box_bb(&m->boxes[i]))) return false;
+    for (int i = 0; i < m->door_count; i++)
+    {
+        if (m->doors[i].open) continue;
+        if (bb_overlap(e, door_bb(&m->doors[i]))) return false;
+    }
+    return true;
 }
 
 RayCollision map_raycast(GameMap *m, Ray ray, float max_dist)

@@ -167,3 +167,22 @@ mysterybox = 0 0.35 -3
 ```
 
 Drop it in `assets/maps/tiny_yard.map` and it shows up in the menu.
+
+## Authoring notes for zombie navigation
+
+Zombies path-find on a 0.5 m walkability grid (`src/nav.c`) built from your
+boxes. A few rules of thumb so the horde can actually reach the player:
+
+- **Corridors and door gaps: at least 1.0 m wide.** Zombies are 0.8 m wide;
+  a 0.75 m gap between an altar and a wall is a pocket they can enter but
+  never leave (and the 0.76 m player cannot pass either).
+- **Every spawn point needs a route to the player** that never steps up more
+  than 0.62 m. Zombies happily drop off any ledge (parapets, bunkers roofs),
+  but they cannot climb back up - a spawn area only reachable by climbing is
+  a round that never ends.
+- Doorway thresholds: if the floor changes between two slabs across a door,
+  keep the gap between them under 0.6 m (the nav grid bridges small gaps,
+  the collision AABB lets bodies cross them).
+- Box `y` is the **bottom** of the box (see the format table). Mixing
+  "centre" and "bottom" thinking in one map shifts geometry by half a box
+  and embeds the spawn point in the floor.

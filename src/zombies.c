@@ -82,6 +82,30 @@ int zombies_alive_count(void)
 
 int zombies_pending_count(void) { return s_to_spawn; }
 
+// pathtest support: position of the zombie in a given slot (false if gone)
+bool zombies_slot_pos(int slot, Vector3 *out)
+{
+    if (slot < 0 || slot >= MAX_ZOMBIES) return false;
+    Zombie *z = &g_zombies[slot];
+    if (!z->active || z->state == ZSTATE_DYING) return false;
+    *out = z->pos;
+    return true;
+}
+
+// pathtest support: full state of a slot for debugging stalls
+bool zombies_slot_debug(int slot, Vector3 *out, int *state, float *stuck_t,
+                        float *detour_t)
+{
+    if (slot < 0 || slot >= MAX_ZOMBIES) return false;
+    Zombie *z = &g_zombies[slot];
+    if (!z->active) return false;
+    *out = z->pos;
+    *state = (int)z->state;
+    *stuck_t = z->stuck_t;
+    *detour_t = z->detour_t;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Spawning
 // ---------------------------------------------------------------------------
@@ -210,6 +234,9 @@ static void zombie_face(Zombie *z, Vector3 target)
 
 void zombies_update(float dt, bool player_alive)
 {
+    // refresh the shared nav flow field from the player's position
+    nav_update(&g.map, g_player.pos, dt);
+
     for (int i = 0; i < MAX_ZOMBIES; i++)
     {
         Zombie *z = &g_zombies[i];
@@ -304,7 +331,6 @@ void zombies_update(float dt, bool player_alive)
             case ZSTATE_CHASE:
             {
                 if (!player_alive) break;
-                zombie_face(z, g_player.pos);
                 z->anim_t += dt * (z->runner ? 9.0f : 4.5f);
 
                 float dist = v3_dist_xz(z->pos, g_player.pos);
@@ -315,12 +341,81 @@ void zombies_update(float dt, bool player_alive)
                     break;
                 }
 
-                // steer toward the player (slide along walls via axis resolve)
-                Vector3 dir = { g_player.pos.x - z->pos.x, 0, g_player.pos.z - z->pos.z };
+                // ---- steering target ----
+                // Straight at the player when close or with a clear line of
+                // sight; otherwise follow the nav flow field, which routes
+                // around walls, down trenches and through doorways instead
+                // of grinding into the first obstacle.
+                Vector3 tgt = g_player.pos;
+                bool guided = false;
+                if (dist > 3.0f)
+                {
+                    // "can I WALK straight to the player?" - cast the ray at
+                    // step height, not eye height: zombies can see over an
+                    // altar or crate they can never climb and would then
+                    // beeline straight into it forever
+                    Vector3 eye = { z->pos.x, z->pos.y + 0.55f, z->pos.z };
+                    Vector3 chest = { g_player.pos.x, g_player.pos.y + 0.55f, g_player.pos.z };
+                    Vector3 dv = Vector3Subtract(chest, eye);
+                    float dl = Vector3Length(dv);
+                    bool visible = (dl <= 0.01f);
+                    if (!visible)
+                    {
+                        Ray ray = { eye, { dv.x / dl, dv.y / dl, dv.z / dl } };
+                        RayCollision rc = map_raycast(&g.map, ray, dl);
+                        visible = !rc.hit;
+                    }
+                    if (!visible)
+                        guided = nav_steer(&g.map, z->pos, &tgt);
+                }
+
+                Vector3 dir = { tgt.x - z->pos.x, 0, tgt.z - z->pos.z };
                 float len = sqrtf(dir.x * dir.x + dir.z * dir.z);
                 if (len > 0.001f) { dir.x /= len; dir.z /= len; }
 
-                // separation from other zombies
+                // ---- anti-stuck ----
+                // barely moved since last frame while chasing: after a
+                // second of that, lunge in a random direction for a moment
+                // (unsticks doorway / corner pile-ups)
+                float moved = v3_dist_xz(z->pos, z->last_pos);
+                z->last_pos = z->pos;
+                if (moved < z->speed * dt * 0.3f)
+                    z->stuck_t += dt;
+                else
+                    z->stuck_t = fmaxf(0.0f, z->stuck_t - dt * 2.0f);
+                if (z->stuck_t > 1.0f)
+                {
+                    z->stuck_t = 0.0f;
+                    z->detour_t = 0.9f;
+                    z->detour_slide = false;
+                    float a = frand_range(0.0f, 2.0f * PI);
+                    z->detour_x = cosf(a);
+                    z->detour_z = sinf(a);
+                }
+                if (z->detour_t > 0.0f)
+                {
+                    z->detour_t -= dt;
+                    if (z->detour_slide)
+                    {
+                        // wall slide: go full speed along the wall toward
+                        // the target instead of grinding into the face
+                        dir.x = z->detour_x;
+                        dir.z = z->detour_z;
+                    }
+                    else
+                    {
+                        dir.x += z->detour_x * 1.2f;
+                        dir.z += z->detour_z * 1.2f;
+                        len = sqrtf(dir.x * dir.x + dir.z * dir.z);
+                        if (len > 0.001f) { dir.x /= len; dir.z /= len; }
+                    }
+                }
+
+                // separation from other zombies: strong up close so the horde
+                // fans out into an attack arc, weak at range so zombies
+                // funnel through doorways as a column instead of jamming
+                // shoulder-first into the walls beside the opening
+                float sep_w = 0.8f * clampf(4.0f / fmaxf(dist, 0.5f), 0.25f, 1.0f);
                 for (int j = 0; j < MAX_ZOMBIES; j++)
                 {
                     if (j == i) continue;
@@ -331,12 +426,16 @@ void zombies_update(float dt, bool player_alive)
                     if (d2 > 0.0001f && d2 < 0.65f * 0.65f)
                     {
                         float d = sqrtf(d2);
-                        dir.x += dx / d * 0.8f;
-                        dir.z += dz / d * 0.8f;
+                        dir.x += dx / d * sep_w;
+                        dir.z += dz / d * sep_w;
                     }
                 }
                 len = sqrtf(dir.x * dir.x + dir.z * dir.z);
                 if (len > 0.001f) { dir.x /= len; dir.z /= len; }
+
+                // remember the direction we WANT to travel (for the
+                // wall-contact check after the move)
+                float want_x = dir.x, want_z = dir.z;
 
                 z->vel.x = dir.x * z->speed;
                 z->vel.z = dir.z * z->speed;
@@ -344,6 +443,58 @@ void zombies_update(float dt, bool player_alive)
                 bool og = false;
                 map_move_aabb(&g.map, &z->pos, &z->vel, dt, ZOMBIE_RADIUS,
                               ZOMBIE_HEIGHT, ZOMBIE_STEP_HEIGHT, &og);
+
+                // bumped a wall this frame? (map_move_aabb zeroes the
+                // blocked axis) - start a short slide along the wall so the
+                // zombie rounds corners and unwedges from door jambs at
+                // full speed instead of grinding. The slide direction is
+                // PROBED: nudge half a metre to either side and keep the
+                // side from which the blocked axis is actually clear (a
+                // corner-clipped body often only escapes one way).
+                if (z->detour_t <= 0.0f)
+                {
+                    bool wall_x = (fabsf(z->vel.x) < 0.001f && fabsf(want_x) > 0.15f);
+                    bool wall_z = (fabsf(z->vel.z) < 0.001f && fabsf(want_z) > 0.15f);
+                    if (wall_x && !wall_z)
+                    {
+                        float step = (want_x > 0) ? 0.06f : -0.06f;
+                        Vector3 pn = { z->pos.x + step, z->pos.y, z->pos.z + 0.50f };
+                        Vector3 pp = { z->pos.x + step, z->pos.y, z->pos.z - 0.50f };
+                        bool n_ok = map_body_fits(&g.map, pn, ZOMBIE_RADIUS, ZOMBIE_HEIGHT);
+                        bool p_ok = map_body_fits(&g.map, pp, ZOMBIE_RADIUS, ZOMBIE_HEIGHT);
+                        if (n_ok || p_ok)
+                        {
+                            z->detour_t = 0.45f;
+                            z->detour_slide = true;
+                            z->detour_x = 0.0f;
+                            // prefer the side the target is on when both work
+                            if (n_ok && p_ok)
+                                z->detour_z = (tgt.z >= z->pos.z) ? 1.0f : -1.0f;
+                            else z->detour_z = n_ok ? 1.0f : -1.0f;
+                        }
+                    }
+                    else if (wall_z && !wall_x)
+                    {
+                        float step = (want_z > 0) ? 0.06f : -0.06f;
+                        Vector3 pn = { z->pos.x + 0.50f, z->pos.y, z->pos.z + step };
+                        Vector3 pp = { z->pos.x - 0.50f, z->pos.y, z->pos.z + step };
+                        bool n_ok = map_body_fits(&g.map, pn, ZOMBIE_RADIUS, ZOMBIE_HEIGHT);
+                        bool p_ok = map_body_fits(&g.map, pp, ZOMBIE_RADIUS, ZOMBIE_HEIGHT);
+                        if (n_ok || p_ok)
+                        {
+                            z->detour_t = 0.45f;
+                            z->detour_slide = true;
+                            z->detour_z = 0.0f;
+                            if (n_ok && p_ok)
+                                z->detour_x = (tgt.x >= z->pos.x) ? 1.0f : -1.0f;
+                            else z->detour_x = n_ok ? 1.0f : -1.0f;
+                        }
+                    }
+                }
+
+                // look where you are going; face the player up close
+                if (dist < 4.0f || !guided) zombie_face(z, g_player.pos);
+                else zombie_face(z, tgt);
             } break;
 
             case ZSTATE_ATTACK:

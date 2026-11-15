@@ -30,6 +30,10 @@ and survive as many rounds as the horde allows.
   throwable grenades (G) with wall-buy refills, and a knife (V) with a proper viewmodel
 - **Buyable doors and rooms** — maps can gate areas behind doors; zombie spawning follows
   the room you're in
+- **Pathfinding horde** — zombies navigate with a walkability grid + BFS flow field
+  (`src/nav.c`): they route around walls, down trenches and through doorways instead of
+  grinding into the first obstacle, beeline when they can see you, and slide along walls
+  to round corners
 - **Classic economy** — 10 points per hit, 50 per kill, 10 per board repaired;
   wall buys and the **950-point mystery box**
 - **All content is data-driven** — maps, weapon stats, textures and sounds load from `assets/`
@@ -111,15 +115,20 @@ make RAYLIB_WAYLAND=1
 Linux is the primary platform; Windows and macOS compile in CI but are less
 tested.
 
-### Headless regression test
+### Headless regression tests
 
-The game has a built-in self-test used by CI — it loads a map, plays a scripted
-session, takes a screenshot and prints statistics:
+The game has built-in self-tests used by CI:
 
 ```sh
-xvfb-run -a ./build/dead_arrival --autotest theater.map 1800 out.png
+xvfb-run -a ./build/dead_arrival --autotest theater.map 1800 out.png   # scripted session
+xvfb-run -a ./build/dead_arrival --pathtest theater.map 60 out.png     # zombie reachability
 ./build/dead_arrival --list-maps
 ```
+
+`--pathtest` freezes the round flow, places one zombie at every spawn point /
+barrier (doors open, boards pre-torn) and verifies that every one of them
+path-finds its way to the player — the regression test for the navigation
+system (grid + BFS flow field in `src/nav.c`).
 
 ## Project layout
 

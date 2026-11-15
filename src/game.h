@@ -331,6 +331,7 @@ int  map_room_of(const GameMap *m, Vector3 p);        // room index or -1
 // collision helpers
 bool map_move_aabb(GameMap *m, Vector3 *pos, Vector3 *vel, float dt,
                    float radius, float height, float step_height, bool *on_ground);
+bool map_body_fits(GameMap *m, Vector3 pos, float radius, float height);
 RayCollision map_raycast(GameMap *m, Ray ray, float max_dist);
 Vector3 map_box_center(const MapBox *b);
 BoundingBox barrier_bb(const Barrier *b);
@@ -388,6 +389,13 @@ typedef struct Zombie {
     float  hit_flash;
     int    at_barrier;     // barrier index or -1
     bool   runner;
+    // steering / anti-stuck (nav-guided chase)
+    Vector3 last_pos;      // where we were last frame (stuck detection)
+    float  stuck_t;        // seconds without making progress
+    float  detour_t;       // >0 while taking a detour
+    float  detour_x, detour_z;
+    bool   detour_slide;   // detour is a wall-slide (full override), not a
+                           // random unstick lunge
 } Zombie;
 
 void zombies_reset(void);
@@ -398,12 +406,25 @@ Zombie *zombies_spawn(int barrier_or_spawn_idx, bool at_barrier);
 int  zombies_alive_count(void);
 int  zombies_pending_count(void);
 int  zombies_total_spawned(void);
+bool zombies_slot_pos(int slot, Vector3 *out);  // pathtest per-slot query
+bool zombies_slot_debug(int slot, Vector3 *out, int *state, float *stuck_t,
+                        float *detour_t);
 bool zombies_nearest(Vector3 to, Vector3 *out);   // nearest live zombie center
 // hitscan query: returns zombie hit info, fills hit_zombie + headshot flag
 typedef struct ZombieHit { int index; float dist; bool head; } ZombieHit;
 int  zombies_raycast(Ray ray, float max_dist, ZombieHit *out, int max_out);
 void zombies_damage(int index, float dmg, Vector3 at, bool headshot,
                     int *killed_out, Vector3 *kill_pos);
+
+// ---------------------------------------------------------------------------
+// Navigation (nav.c): walkability grid + BFS flow field for zombie AI
+// ---------------------------------------------------------------------------
+void nav_build(const GameMap *m);                 // after map_load
+void nav_unload(void);
+void nav_update(const GameMap *m, Vector3 player_pos, float dt);  // 1x/frame
+bool nav_steer(const GameMap *m, Vector3 pos, Vector3 *out_target);
+void nav_debug_dump(void);                        // --navdump (ASCII field)
+void nav_debug_cell(float x, float z);                 // --navcell (levels+dist)
 
 // ---------------------------------------------------------------------------
 // Player
@@ -538,6 +559,7 @@ typedef struct Game {
     float frame_time;
     float time;            // total elapsed
     bool  autotest;
+    bool  pathtest;        // --pathtest: stationary player, reachability run
     bool  want_quit;
 } Game;
 

@@ -25,6 +25,7 @@ void game_start_map(const char *file)
     world_init();
     particles_reset();
     zombies_reset();
+    nav_build(&g.map);      // walkability grid for zombie pathfinding
     player_reset(g.map.player_spawn, g.map.player_yaw);
 
     g.round = 0;
@@ -40,6 +41,7 @@ void game_start_map(const char *file)
 void game_end_to_menu(void)
 {
     if (g.map_loaded) map_unload(&g.map);
+    nav_unload();
     g.map_loaded = false;
     if (g.round > g.best_round) g.best_round = g.round;
     g.state = GS_MENU;
@@ -279,6 +281,209 @@ static int cli_autotest(const char *mapfile, int frames, const char *outpng)
 }
 
 // ---------------------------------------------------------------------------
+// --pathtest <map.map> <seconds> [out.png] : zombie reachability run.
+// The player stands still at the spawn (invulnerable, never fires); one
+// zombie is placed at every spawn point / barrier. Verifies pathfinding:
+// every zombie must reach melee range of the player.
+// ---------------------------------------------------------------------------
+static int cli_pathtest(const char *mapfile, int seconds, const char *outpng)
+{
+    // "reached" = closed to melee distance; with a whole horde crowding one
+    // stationary target, separation keeps the outer ring slightly back, so
+    // this is a bit beyond ZOMBIE_ATTACK_RANGE
+    const float PATHTEST_REACH = 2.0f;
+    g.autotest = true;
+    g.pathtest = true;
+    game_boot(true);
+    SetRandomSeed(42);
+    if (!IsWindowReady()) return 2;
+
+    game_start_map(mapfile);
+    if (!g.map_loaded) { game_shutdown(); return 2; }
+
+    // freeze the round flow: exactly the zombies we place, nothing more
+    g.round_break_t = 1e9f;
+    g.frame_time = 1.0f / 60.0f;
+    g_player.hp = 10000000;     // invulnerable: measure reachability, not survival
+
+    int npts = 0;
+    if (g.map.spawn_mode == SPAWN_BARRIERS)
+    {
+        // navigation test: open every door and pre-tear every barrier so
+        // all spawn points are connected to the player
+        for (int i = 0; i < g.map.door_count; i++) g.map.doors[i].open = true;
+        for (int i = 0; i < g.map.barrier_count; i++)
+        {
+            g.map.barriers[i].boards = 0;
+            zombies_spawn(i, true);
+            npts++;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < g.map.spawn_count; i++)
+        {
+            zombies_spawn(i, false);
+            npts++;
+        }
+    }
+
+    float min_dist[MAX_ZOMBIES];
+    float reach_t[MAX_ZOMBIES];
+    Vector3 final_pos[MAX_ZOMBIES];
+    for (int i = 0; i < MAX_ZOMBIES; i++)
+    {
+        min_dist[i] = 1e9f;
+        reach_t[i] = -1.0f;
+        final_pos[i] = (Vector3){ 0, 0, 0 };
+    }
+
+    Vector3 spawn_pos = g_player.pos;
+    int frames = seconds * 60;
+    for (int f = 0; f < frames && !WindowShouldClose(); f++)
+    {
+        g.time += g.frame_time;
+        game_update_playing(g.frame_time);
+        for (int i = 0; i < npts; i++)
+        {
+            Vector3 zp;
+            if (!zombies_slot_pos(i, &zp)) continue;
+            final_pos[i] = zp;
+            float d = v3_dist_xz(zp, g_player.pos);
+            if (d < min_dist[i])
+            {
+                min_dist[i] = d;
+                if (d <= PATHTEST_REACH && reach_t[i] < 0.0f)
+                    reach_t[i] = g.time;
+            }
+        }
+        // periodic trace of the zombies that have not reached the player yet
+        if (f % 120 == 0)
+        {
+            printf("T+%04.1f", g.time);
+            for (int i = 0; i < npts; i++)
+            {
+                Vector3 zp;
+                int st = -1; float stk = -1, det = -1;
+                if (!zombies_slot_debug(i, &zp, &st, &stk, &det)) continue;
+                if (min_dist[i] <= PATHTEST_REACH) continue;
+                printf(" | z%d(%.1f,%.1f)s%dk%.1fd%.1f", i, zp.x, zp.z, st, stk, det);
+            }
+            printf("\n");
+        }
+        BeginDrawing();
+        game_draw_playing();
+        EndDrawing();
+    }
+
+    if (outpng) TakeScreenshot(outpng);
+
+    float pdrift = v3_dist_xz(g_player.pos, spawn_pos);
+    int reached = 0;
+    printf("PATHTEST map=%s zombies=%d seconds=%d player_drift=%.2f player_y=%.2f\n",
+           mapfile, npts, seconds, pdrift, g_player.pos.y);
+    for (int i = 0; i < npts; i++)
+    {
+        int st = -1; float stk = -1, det = -1;
+        Vector3 zp;
+        zombies_slot_debug(i, &zp, &st, &stk, &det);
+        printf("PATHTEST z%02d min_dist=%6.2f reached=%s t=%.1f end=(%.1f, %.1f) "
+               "state=%d stuck=%.2f detour=%.2f\n",
+               i, min_dist[i],
+               (min_dist[i] <= PATHTEST_REACH) ? "YES" : "NO",
+               reach_t[i], final_pos[i].x, final_pos[i].z, st, stk, det);
+        if (min_dist[i] <= PATHTEST_REACH) reached++;
+    }
+    bool ok = (npts > 0) && (reached == npts) && (pdrift < 2.0f);
+    printf("PATHTEST RESULT: %s (%d/%d reached)\n", ok ? "PASS" : "FAIL", reached, npts);
+
+    game_shutdown();
+    return ok ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// --navdump <map.map> <px> <py> <pz> : ASCII dump of the nav flow field from
+// a given player position (pathfinding debugging)
+// ---------------------------------------------------------------------------
+static int cli_navdump(const char *mapfile, float px, float py, float pz)
+{
+    g.autotest = true;
+    game_boot(true);
+    SetRandomSeed(42);
+    if (!IsWindowReady()) return 2;
+
+    game_start_map(mapfile);
+    if (!g.map_loaded) { game_shutdown(); return 2; }
+
+    for (int i = 0; i < g.map.door_count; i++) g.map.doors[i].open = true;
+    for (int i = 0; i < g.map.barrier_count; i++) g.map.barriers[i].boards = 0;
+
+    nav_update(&g.map, (Vector3){ px, py, pz }, 1.0f);
+    nav_debug_dump();
+
+    game_shutdown();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// --zombietrace <map.map> <zx> <zy> <zz> <seconds> : one zombie from a given
+// position, player at spawn; prints its state/steering each 0.5 s
+// ---------------------------------------------------------------------------
+static int cli_zombietrace(const char *mapfile, float zx, float zy, float zz,
+                           int seconds)
+{
+    g.autotest = true;
+    g.pathtest = true;
+    game_boot(true);
+    SetRandomSeed(42);
+    if (!IsWindowReady()) return 2;
+
+    game_start_map(mapfile);
+    if (!g.map_loaded) { game_shutdown(); return 2; }
+
+    g.round_break_t = 1e9f;
+    g.frame_time = 1.0f / 60.0f;
+    g_player.hp = 10000000;
+
+    for (int i = 0; i < g.map.door_count; i++) g.map.doors[i].open = true;
+    for (int i = 0; i < g.map.barrier_count; i++) g.map.barriers[i].boards = 0;
+
+    Zombie *z = zombies_spawn(0, true);
+    if (!z) { game_shutdown(); return 2; }
+    z->pos = (Vector3){ zx, zy, zz };
+    z->state = ZSTATE_CHASE;
+    z->speed = 1.5f;
+    z->runner = false;
+
+    Vector3 tgt = { 0 };
+    printf("TRACE map=%s zombie=(%.1f, %.1f, %.1f) player=(%.1f, %.1f, %.1f)\n",
+           mapfile, zx, zy, zz, g_player.pos.x, g_player.pos.y, g_player.pos.z);
+
+    int frames = seconds * 60;
+    for (int f = 0; f < frames && !WindowShouldClose(); f++)
+    {
+        g.time += g.frame_time;
+        game_update_playing(g.frame_time);
+
+        if (f % 30 == 0)
+        {
+            float d = v3_dist_xz(z->pos, g_player.pos);
+            bool guided = nav_steer(&g.map, z->pos, &tgt);
+            printf("TRACE t=%5.1f pos=(%6.2f,%6.2f,%6.2f) state=%d dist=%5.2f "
+                   "nav=%d tgt=(%.1f,%.1f) stuck=%.1f\n",
+                   g.time, z->pos.x, z->pos.y, z->pos.z, (int)z->state, d,
+                   guided, tgt.x, tgt.z, z->stuck_t);
+        }
+        BeginDrawing();
+        game_draw_playing();
+        EndDrawing();
+    }
+
+    game_shutdown();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -332,6 +537,28 @@ int main(int argc, char **argv)
         if (frames < 60) frames = 60;
         return cli_autotest(argv[2], frames, (argc >= 5) ? argv[4] : NULL);
     }
+
+    if (argc >= 4 && strcmp(argv[1], "--pathtest") == 0)
+    {
+        int secs = atoi(argv[3]);
+        if (secs < 5) secs = 5;
+        return cli_pathtest(argv[2], secs, (argc >= 5) ? argv[4] : NULL);
+    }
+
+    if (argc >= 6 && strcmp(argv[1], "--navdump") == 0)
+    {
+        int rc = cli_navdump(argv[2], (float)atof(argv[3]),
+                             (float)atof(argv[4]), (float)atof(argv[5]));
+        // bonus: if more coordinates follow, print their cell details
+        for (int a = 6; a + 1 < argc; a += 2)
+            nav_debug_cell((float)atof(argv[a]), (float)atof(argv[a + 1]));
+        return rc;
+    }
+
+    if (argc >= 7 && strcmp(argv[1], "--zombietrace") == 0)
+        return cli_zombietrace(argv[2], (float)atof(argv[3]),
+                               (float)atof(argv[4]), (float)atof(argv[5]),
+                               atoi(argv[6]));
 
     if (argc >= 3 && strcmp(argv[1], "--autotest-menu") == 0)
         return cli_menu_shot(argv[2], (argc >= 4) ? argv[3] : NULL);
